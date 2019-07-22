@@ -68,37 +68,52 @@ Form
         }
     }
     
-    Group
+    Section
     {
-        CheckBox { label: qsTr("Monitor Deviance"); name: "monitorDeviance"}
-        CheckBox { label: qsTr("Monitor DIC"); name: "monitorDIC"}
+        title: qsTr("Advanced")
+        Group
+        {
+            CheckBox { label: qsTr("Monitor Deviance"); name: "monitorDeviance"}
+            CheckBox { label: qsTr("Monitor DIC"); name: "monitorDIC"}
+        }
+        
+//        RadioButtonGroup
+//        {
+//            name: "shownParameters"
+//            title: qsTr("Posterior Samples")
+//            RadioButton { value: "limited";  	label: qsTr("limited"); checked: true }
+//            RadioButton { value: "unlimited";	label: qsTr("unlimited"); }
+//        }
+        
+//        Group
+//        {
+//            IntegerField
+//            {
+//                name: "numShownParamsFrom"
+//                label: qsTr("numShownParamsFrom")
+//                defaultValue: 10
+//                min: 1
+//                max: 1e9
+//            }
+//            IntegerField
+//            {
+//                name: "numShownParamsTo"
+//                label: qsTr("numShownParamsTo")
+//                defaultValue: 100
+//                min: 1
+//                max: 1e9
+//            }
+//        }
     }
     
-    RadioButtonGroup
+    Section
     {
-        name: "shownParameters"
-        title: qsTr("Posterior Samples")
-        RadioButton { value: "limited";  	label: qsTr("limited"); checked: true }
-        RadioButton { value: "unlimited";	label: qsTr("unlimited"); }
-    }
-
-    Group
-    {
-        IntegerField
+        title: qsTr("Initial Values")
+        TextArea
         {
-            name: "numShownParamsFrom"
-            label: qsTr("numShownParamsFrom")
-            defaultValue: 10
-            min: 1
-            max: 1e9
-        }
-        IntegerField
-        {
-            name: "numShownParamsTo"
-            label: qsTr("numShownParamsTo")
-            defaultValue: 100
-            min: 1
-            max: 1e9
+            title: qsTr("Enter initial values as an R list")
+            name: "initialValues"
+            textType: "JAGS"
         }
     }
 }

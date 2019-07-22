@@ -24,7 +24,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   # run model or update model
 	mcmcResult <- .JAGSrunMCMC(jaspResults, dataset, options)
 
-  # create output
+	# create output
 	.JAGSoutputTable         (jaspResults, options, mcmcResult)
 	.JAGSplotMarginalDensity (jaspResults, options, mcmcResult)
 	.JAGSplotTrace           (jaspResults, options, mcmcResult)
@@ -374,7 +374,9 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   	  # no subsets! just save the bases
   	  options[["parametersToShow"]] <- paramsShownBase
   	} else {
-  	  # save subsets of parameters
+  	  # save subsets of parameters -- split into subset and non subsets
+
+  	  paramsShown <- unlist(stringr::str_split(paramsShown, " "))
   		# everything between [...]
   		paramsShownIdx <- stringr::str_extract_all(paramsShown, "(?<=\\[).+?(?=\\])")
   		names(paramsShownIdx) <- paramsShown
@@ -393,7 +395,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   					JASP:::.quitAnalysis(msg)
   				}
 
-  			  if (grepl(""))
+  			  # if (grepl(""))
 
   				if (grepl(",", s)) {
   					# split on , but not if it's inside parentheses ( ), to allow mu[c(1, 2, 3), 1:2]
@@ -452,14 +454,30 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   					JASP:::.quitAnalysis(sprintf("In parameters to show, %s has an additional '[' or ']' (%d vs %d)",
   																str, countLeft, countRight))
   				}
+  				paramsShownIdx[[i]] <- str
   			}
   		}
   		options[["parametersToShow"]] <- paramsShownIdx
   	}
   }
-  print('options[["parametersToShow"]]')
-  print(options[["parametersToShow"]])
+  # print('options[["parametersToShow"]]')
+  # print(options[["parametersToShow"]])
 
+  if (is.list(options[["parametersToShow"]])) {
+
+    options[["bayesplot"]] <- list(
+      pars = unlist(options[["parametersToShow"]]),
+      regex_pars = character()
+    )
+
+  } else {
+
+    options[["bayesplot"]] <- list(
+      pars = character(),
+      regex_pars = options[["parametersToShow"]]
+    )
+
+  }
 
 	if (options[["monitorDeviance"]])
 		options[["parametersToSave"]] <- c("deviance", options[["parametersToSave"]])
@@ -577,7 +595,11 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
     return()
 
-	plot$plotObject <- bayesplot::mcmc_dens(mcmcResult$samples, pars = options[["parametersToShow"]])
+	# mcmc_dens_chains
+	plot$plotObject <- bayesplot::mcmc_dens(mcmcResult$samples,
+    pars = options[["bayesplot"]][["pars"]],
+    regex_pars = options[["bayesplot"]][["regex_pars"]]
+  )
 	return()
 }
 
@@ -590,7 +612,10 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
     return()
 
-  plot$plotObject <- bayesplot::mcmc_trace(mcmcResult$samples, pars = options[["parametersToShow"]])
+  plot$plotObject <- bayesplot::mcmc_trace(mcmcResult$samples,
+    pars = options[["bayesplot"]][["pars"]],
+    regex_pars = options[["bayesplot"]][["regex_pars"]]
+  )
 	return()
 }
 
@@ -603,7 +628,11 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
     return()
 
-  plot$plotObject <- bayesplot::mcmc_acf(mcmcResult$samples, pars = options[["parametersToShow"]])
+  plot$plotObject <- bayesplot::mcmc_acf(
+    mcmcResult$samples,
+    pars = options[["bayesplot"]][["pars"]],
+    regex_pars = options[["bayesplot"]][["regex_pars"]]
+  )
 	return()
 }
 
@@ -618,7 +647,16 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
   if (length(options[["parametersToShow"]]) >= 2L) {
     png(f <- tempfile())
-    plot$plotObject <- bayesplot::mcmc_pairs(mcmcResult[["samples"]], pars = options[["parametersToShow"]])
+    plot$plotObject <- bayesplot::mcmc_pairs(
+      mcmcResult[["samples"]],
+      pars = options[["bayesplot"]][["pars"]],
+      regex_pars = options[["bayesplot"]][["regex_pars"]]
+    )
+    # if (is.list(options[["parametersToShow"]])) {
+    #   plot$plotObject <- bayesplot::mcmc_pairs(mcmcResult[["samples"]], pars = unlist(options[["parametersToShow"]]))
+    # } else {
+    #   plot$plotObject <- bayesplot::mcmc_pairs(mcmcResult[["samples"]], regex_pars = options[["parametersToShow"]])
+    # }
     if (file.exists(f)) file.remove(f)
   } else {
     plot$setError("At least two parameters need to be monitored and shown to make a bivariate scatter plot!")
