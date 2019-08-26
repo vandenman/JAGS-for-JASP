@@ -1,3 +1,21 @@
+//
+// Copyright (C) 2013-2018 University of Amsterdam
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public
+// License along with this program.  If not, see
+// <http://www.gnu.org/licenses/>.
+//
+
 import QtQuick 2.8
 import JASP.Controls 1.0
 import JASP.Theme 1.0
@@ -11,60 +29,63 @@ Form
 		title: qsTr("Enter JAGS model below")
 		name: "model"
 		textType: "JAGS"
+        text: "model{\n\n}";
 	}
 
-//    TextField { name: "nameForN"; label: qsTr("Name for sample size"); default: "n"; fieldWidth: 200 }
-    
-//    TextField { name: "initialValues"; label: qsTr("Name for sample size"); fieldWidth: 200 } 
-    
     Group
     {
-        TextField { name: "nameForN"; label: qsTr("Name for sample size")}     
-        TextField { name: "parametersMonitored"; label: qsTr("Parameters Monitored") }  // defualt $ALL
-        TextField { name: "parametersShown"; label: qsTr("Parameters Shown")}
+        TextField { name: "nameForN";               label: qsTr("Name for sample size"); text: "N"      }
+        TextField { name: "parametersMonitored";    label: qsTr("Parameters Monitored"); text: "$ALL"   }
+        TextField { name: "parametersShown";        label: qsTr("Parameters Shown")    ;                }
     }
-    
+
     Group
     {
-        CheckBox { label: qsTr("Trace plots"); name: "plotTrace"}
-        CheckBox { label: qsTr("Density plots"); name: "plotDensity"}
-        CheckBox { label: qsTr("Autocorrelation plots"); name: "plotAutoCor"}
-        CheckBox { label: qsTr("Bivariate scatter plots"); name: "plotBivarHex"}
-    }
+        columns: 2
+
     
-    Group
-    {
-        IntegerField
+        Group
         {
-            name: "noSamples"
-            label: qsTr("No. samples")
-            defaultValue: 2e3
-            min: 10
-            max: 1e9
+            CheckBox { label: qsTr("Trace plots");              name: "plotTrace"   }
+            CheckBox { label: qsTr("Density plots");            name: "plotDensity" }
+            CheckBox { label: qsTr("Autocorrelation plots");    name: "plotAutoCor" }
+            CheckBox { label: qsTr("Bivariate scatter plots");  name: "plotBivarHex"}
         }
-        IntegerField
+    
+        Group
         {
-            name: "noBurnin"
-            label: qsTr("No. burnin samples")
-            defaultValue: 500
-            min: 1
-            max: 1e9
-        }
-        IntegerField
-        {
-            name: "noThinning"
-            label: qsTr("thinning")
-            defaultValue: 1
-            min: 1
-            max: 1e9
-        }
-        IntegerField
-        {
-            name: "noChains"
-            label: qsTr("No. chains")
-            defaultValue: 3
-            min: 1
-            max: 50
+            IntegerField
+            {
+                name: "noSamples"
+                label: qsTr("No. samples")
+                defaultValue: 2e3
+                min: 10
+                max: 1e9
+            }
+            IntegerField
+            {
+                name: "noBurnin"
+                label: qsTr("No. burnin samples")
+                defaultValue: 500
+                min: 1
+                max: 1e9
+            }
+            IntegerField
+            {
+                name: "noThinning"
+                label: qsTr("thinning")
+                defaultValue: 1
+                min: 1
+                max: 1e9
+            }
+            IntegerField
+            {
+                name: "noChains"
+                label: qsTr("No. chains")
+                defaultValue: 3
+                min: 1
+                max: 50
+            }
         }
     }
     

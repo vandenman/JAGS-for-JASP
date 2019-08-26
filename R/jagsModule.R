@@ -39,7 +39,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
   if (is.null(jaspResults[["mainContainer"]])) {
     # setup outer container with all common dependencies
-    mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains"))
+    mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
+                                                          "nameForN", "parametersMonitored", "parametersShown"))
     jaspResults[["mainContainer"]] <- mainContainer
   }
 
@@ -176,81 +177,6 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 	return(out)
 
-}
-
-.extractJAGSErrorMessage <- function(error) {
-  split <- base::strsplit(as.character(error), "\n")[[1]]
-  return(trimws(paste(split[-1L], collapse = "\n")))
-}
-
-.JAGSmodelError <- function(error, pattern, model, options) {
-
-	if (options[["hasData"]]) {
-	revPattern <- names(pattern)
-	names(revPattern) <- pattern
-
-	# change base64 to normal variable names
-	errorMessage <- stringr::str_replace_all(
-		string  = .extractJAGSErrorMessage(error),
-		pattern = revPattern
-	)
-	} else {
-		errorMessage <- .extractJAGSErrorMessage(error)
-	}
-
-	if (!is.null(unlist(options[["possibleTypos"]]))) {
-
-		toAdd <- NULL
-		idx <- stringr::str_detect(errorMessage, paste0("\\b", options[["possibleParams"]], "\\b"))
-		nmax <- max(nchar(options[["possibleParams"]][idx]))
-		if (any(idx)) {
-
-			toAdd <- paste0("Model", strrep(" ", nmax - 5L), " | Data\n")
-			toAdd <- paste0(toAdd, strrep("-", nchar(toAdd)), "\n")
-
-			for (i in which(idx)) {
-				toAdd <- paste0(toAdd,
-					options[["possibleParams"]][[i]],
-					" | ",
-					paste(options[["possibleTypos"]][[i]], collapse = ", "),
-					"\n"
-				)
-			}
-		}
-
-		if (!is.null(toAdd))
-			errorMessage <- paste0(errorMessage, "\n\nPossible typos detected:\n\n", toAdd)
-
-	}
-
-	# perhaps some helpfull checks...
-	chars <- stringr::fixed(c("[", "]", "{", "}", "(", ")"))
-	counts <- stringr::str_count(model, chars)
-	toAdd <- paste(
-		.JAGSmodelErrorString(counts[1:2], chars[1:2]),
-		.JAGSmodelErrorString(counts[3:4], chars[3:4]),
-		.JAGSmodelErrorString(counts[5:6], chars[5:6])
-	)
-
-	if (length(toAdd) > 0L)
-		errorMessage <- paste0(errorMessage, "\n\nIn addition:\n", toAdd)
-
-
-	# kill analysis
-	JASP:::.quitAnalysis(errorMessage)
-}
-
-.JAGSmodelErrorString <- function(counts, chars) {
-	if (counts[1L] == counts[2L]) return(NULL)
-
-	if (counts[1L] < counts[2L]) {
-		counts <- counts[2:1]
-		chars <- chars[2:1]
-	}
-	return(sprintf(
-		"The model contains more '%s' than '%s' (%d vs %d)",
-		chars[1L], chars[2L], counts[1L], counts[2L]
-	))
 }
 
 .JAGSInitOptions <- function(options) {
@@ -511,6 +437,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   return(dataset)
 }
 
+# Tables ----
 .JAGSoutputTable <- function(jaspResults, options, mcmcResult) {
 
 	tb <- createJaspTable("MCMC summary")
@@ -586,6 +513,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 }
 
+# Plots ----
 .JAGSplotMarginalDensity <- function(jaspResults, options, mcmcResult) {
 
 	if (!options[["plotDensity"]] || !is.null(jaspResults[["mainContainer"]][["plotMarginalDensity"]])) return()
@@ -673,6 +601,81 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 #     # if checks pass, return empty string
 #     return("")
 # }
+
+# Errors ----
+.extractJAGSErrorMessage <- function(error) {
+  split <- base::strsplit(as.character(error), "\n")[[1]]
+  return(trimws(paste(split[-1L], collapse = "\n")))
+}
+
+.JAGSmodelError <- function(error, pattern, model, options) {
+
+  if (options[["hasData"]]) {
+    revPattern <- names(pattern)
+    names(revPattern) <- pattern
+
+    # change base64 to normal variable names
+    errorMessage <- stringr::str_replace_all(
+      string  = .extractJAGSErrorMessage(error),
+      pattern = revPattern
+    )
+  } else {
+    errorMessage <- .extractJAGSErrorMessage(error)
+  }
+
+  if (!is.null(unlist(options[["possibleTypos"]]))) {
+
+    toAdd <- NULL
+    idx <- stringr::str_detect(errorMessage, paste0("\\b", options[["possibleParams"]], "\\b"))
+    nmax <- max(nchar(options[["possibleParams"]][idx]))
+    if (any(idx)) {
+
+      toAdd <- paste0("Model", strrep(" ", nmax - 5L), " | Data\n")
+      toAdd <- paste0(toAdd, strrep("-", nchar(toAdd)), "\n")
+
+      for (i in which(idx)) {
+        toAdd <- paste0(toAdd,
+                        options[["possibleParams"]][[i]],
+                        " | ",
+                        paste(options[["possibleTypos"]][[i]], collapse = ", "),
+                        "\n"
+        )
+      }
+    }
+
+    if (!is.null(toAdd))
+      errorMessage <- paste0(errorMessage, "\n\nPossible typos detected:\n\n", toAdd)
+
+  }
+
+  # perhaps some helpfull checks...
+  chars <- stringr::fixed(c("[", "]", "{", "}", "(", ")"))
+  counts <- stringr::str_count(model, chars)
+  toAdd <- paste(
+    .JAGSmodelErrorString(counts[1:2], chars[1:2]),
+    .JAGSmodelErrorString(counts[3:4], chars[3:4]),
+    .JAGSmodelErrorString(counts[5:6], chars[5:6])
+  )
+
+  if (length(toAdd) > 0L)
+    errorMessage <- paste0(errorMessage, "\n\nIn addition:\n", toAdd)
+
+  # kill analysis
+  JASP:::.quitAnalysis(errorMessage)
+}
+
+.JAGSmodelErrorString <- function(counts, chars) {
+  if (counts[1L] == counts[2L]) return(NULL)
+
+  if (counts[1L] < counts[2L]) {
+    counts <- counts[2:1]
+    chars <- chars[2:1]
+  }
+  return(sprintf(
+    "The model contains more '%s' than '%s' (%d vs %d)",
+    chars[1L], chars[2L], counts[1L], counts[2L]
+  ))
+}
 
 # helper functions ----
 .JAGSisPureNumber <- function(x) suppressWarnings(!is.na(as.numeric(x)))
