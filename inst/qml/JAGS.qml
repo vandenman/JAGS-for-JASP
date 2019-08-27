@@ -29,12 +29,12 @@ Form
 		title: qsTr("Enter JAGS model below")
 		name: "model"
 		textType: "JAGS"
-        text: "model{\n\n}";
+        text: "model{\n\n}"
 	}
 
     Group
     {
-        TextField { name: "nameForN";               label: qsTr("Name for sample size"); text: "N"      }
+        TextField { name: "nameForN";               label: qsTr("Name for sample size"); placeholderText: qsTr("n")      }
         TextField { name: "parametersMonitored";    label: qsTr("Parameters Monitored"); text: "$ALL"   }
         TextField { name: "parametersShown";        label: qsTr("Parameters Shown")    ;                }
     }
@@ -134,6 +134,17 @@ Form
         {
             title: qsTr("Enter initial values as an R list")
             name: "initialValues"
+            textType: "JAGS"
+        }
+    }
+
+    Section
+    {
+        title: qsTr("Data")
+        TextArea
+        {
+            title: qsTr("Enter data as an R list")
+            name: "userData"
             textType: "JAGS"
         }
     }

@@ -12,12 +12,13 @@
 		"requiresDataset": 	 false
 	},
 
-	"requiredPackages":	[
-	  {"package": "bayesplot"},
-	  {"package": "rjags"},
-	  {"package": "coda"},
-	  {"package": "stringr"}
-	],
+// fake JSON comment
+//	"requiredPackages":	[
+//	  {"package": "bayesplot"},
+//	  {"package": "rjags", "version": "4.8"},
+//	  {"package": "coda"},
+//	  {"package": "stringr"}
+//	],
 
 	"menu":
 	[

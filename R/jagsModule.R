@@ -18,7 +18,7 @@
 JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
   # check model
-  options <- .JAGSInitOptions(options)
+  options <- .JAGSInitOptions(jaspResults, options)
   dataset <- .JAGSReadData(options)
 
   # run model or update model
@@ -158,8 +158,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	})
 
 	# if something went wrong, present useful error message
-	if (JASP:::isTryError(e))
-		.JAGSmodelError(e, pattern, model, options)
+	if (JASP:::isTryError(e)) {
+	  jaspResults[["mainContainer"]]$setError(.JAGSmodelError(e, pattern, model, options))
+	  fit <- NULL
+	  samples <- NULL
+
+	}
 
 	out <- list(
 		model              = m,
@@ -179,11 +183,24 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 }
 
-.JAGSInitOptions <- function(options) {
+.JAGSisEmptyModel <- function(model) {
+  regex <- stringr::str_extract(model, "(?<=model\\{\n)(.*)(?=\n\\})")
+  bool1 <- !identical(trimws(model), "")
+  bool2 <- (is.na(regex) || trimws(regex) != "")
+  return(bool1 && bool2)
+}
 
-  model <- options[["model"]]
+.JAGSInitOptions <- function(jaspResults, options) {
 
-  if (!identical(model, "") && !is.null(options[["parametersMonitored"]])) {
+  if (is.null(jaspResults[["mainContainer"]])) {
+    # setup outer container with all common dependencies
+    mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
+                                                          "nameForN", "parametersMonitored", "parametersShown"))
+    jaspResults[["mainContainer"]] <- mainContainer
+  }
+
+  model <- trimws(options[["model"]])
+  if (.JAGSisEmptyModel(model) && !is.null(options[["parametersMonitored"]])) {
     options[["goodModel"]] <- TRUE
   } else {
     options[["goodModel"]] <- FALSE
@@ -191,7 +208,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   }
 
   if (identical(options[["parametersMonitored"]], ""))
-    JASP:::.quitAnalysis("Please specify which parameters to monitor!")
+    jaspResults[["mainContainer"]]$setError("Please specify which parameters to monitor!")
 
   if (is.null(options[["nameForN"]]) || identical(options[["nameForN"]], "")) {
   	options[["nameForN"]] <- "n"
@@ -260,6 +277,9 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (identical(options[["parametersMonitored"]], "$ALL")) {
     # special keyword - monitor all parameters
   	options[["parametersToSave"]] <- possibleParams
+  } else if (identical(options[["parametersMonitored"]], "")) {
+    options[["goodModel"]] <- FALSE
+    return(options)
   } else { # user specified - check for errors
 
     # check if parameters to monitor are a subset of possibleParams
@@ -267,10 +287,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
     paramsToSave <- stringr::str_extract_all(options[["parametersMonitored"]], "\\w+")[[1]]
     diff <- setdiff(paramsToSave, possibleParams) # any mismatches?
     if (length(diff) > 0L) {
-      JASP:::.quitAnalysis(paste0(
+      msg <- paste0(
         "The following parameter(s) should be monitored but do not appear in the model!\n",
         "This happened for:\n\n", paste0(diff, collapse = ", ")
-      ))
+      )
+      jaspResults[["mainContainer"]]$setError(msg)
+      return(options)
     } else {
       # monitors user specified parameters
       options[["parametersToSave"]] <- paramsToSave
@@ -289,10 +311,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   	# check if all parameters to show are actually monitored
   	diff <- setdiff(paramsShownBase, options[["parametersToSave"]])
   	if (length(diff) > 0) {
-  	  JASP:::.quitAnalysis(paste0(
+  	  msg <- paste0(
   	    "The following parameter(s) should be shown but are not monitored!\n",
   	    "This happened for:\n\n", paste(diff, collapse = ", ")
-  	  ))
+  	  )
+  	  jaspResults[["mainContainer"]]$setError(msg)
+  	  return(options)
   	}
 
 
@@ -318,7 +342,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   					# yell at user
   					msg <- sprintf("Negative indexing is not allowed for parameters monitored!\n A problem occured with: %s",
   												 paramsShown[i])
-  					JASP:::.quitAnalysis(msg)
+  					jaspResults[["mainContainer"]]$setError(msg)
+  					return(options)
   				}
 
   			  # if (grepl(""))
@@ -340,7 +365,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
           # check if all s match at least one pattern
           allMatch <- isIdx | isColon | isVector# | isBind
           if (!all(allMatch)) {
-            JASP:::.quitAnalysis(paste0(
+            msg <- paste0(
               "Did not understand ", paramsShown[i], ". Input should be either:\n\n",
               paste(
                 "a single index",
@@ -348,13 +373,16 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
                 "a vector of indices (c(1, 2, 3))",
                 sep = ", or\n"
               )
-            ))
+            )
+  					jaspResults[["mainContainer"]]$setError(msg)
+  					return(options)
+
           }
 
           # this could be done more nicely
           allCombs <- try(do.call(expand.grid, lapply(s, function(x) eval(parse(text = x)))))
           if (isTryError(allCombs)) {
-            JASP:::.quitAnalysis(paste0(
+            msg <- paste0(
               "Did not understand ", paramsShown[i], ". Input should be either:\n\n",
               paste(
                 "a single index",
@@ -362,7 +390,9 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
                 "a vector of indices (c(1, 2, 3))",
                 sep = ", or\n"
               )
-            ))
+            )
+  					jaspResults[["mainContainer"]]$setError(msg)
+  					return(options)
           }
 
           names2lookup <- apply(allCombs, 1, function(x) {
@@ -377,8 +407,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   				countLeft  <- stringr::str_count(str, stringr::fixed("["))
   				countRight <- stringr::str_count(str, stringr::fixed("]"))
   				if (countLeft != countRight) {
-  					JASP:::.quitAnalysis(sprintf("In parameters to show, %s has an additional '[' or ']' (%d vs %d)",
-  																str, countLeft, countRight))
+
+  					msg <- sprintf("In parameters to show, %s has an additional '[' or ']' (%d vs %d)",
+  																str, countLeft, countRight)
+  					jaspResults[["mainContainer"]]$setError(msg)
+  					return(options)
+
   				}
   				paramsShownIdx[[i]] <- str
   			}
@@ -454,7 +488,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	tb$addColumnInfo(name = "rhatCI",    title = "Upper CI",   type = "number", overtitle = ovt2)
 	jaspResults[["mainContainer"]][["mainTable"]] <- tb
 
-	if (!is.null(mcmcResult)) {
+	if (!is.null(mcmcResult) && !jaspResults[["mainContainer"]]$getError()) {
 
 		if (!options[["hasData"]])
 			tb$addFootnote(message = "No data was supplied, everything was sampled from the priors!", symbol = "&#9888;")
@@ -511,6 +545,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	if (!is.null(options[["nameForNwarning"]]))
 		tb$addFootnote(message = options[["nameForNwarning"]])
 
+	return()
 }
 
 # Plots ----
@@ -527,7 +562,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	plot$plotObject <- bayesplot::mcmc_dens(mcmcResult$samples,
     pars = options[["bayesplot"]][["pars"]],
     regex_pars = options[["bayesplot"]][["regex_pars"]]
-  )
+  ) + JASPgraphs::themeJaspRaw()
 	return()
 }
 
@@ -540,10 +575,15 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
     return()
 
+  # plotObject <- bayesplot::mcmc_trace(mcmcResult$samples,
+  #   pars = options[["bayesplot"]][["pars"]],
+  #   regex_pars = options[["bayesplot"]][["regex_pars"]]
+  # ) + JASPgraphs::themeJaspRaw()
+  # plot$width <- 320 *
   plot$plotObject <- bayesplot::mcmc_trace(mcmcResult$samples,
     pars = options[["bayesplot"]][["pars"]],
     regex_pars = options[["bayesplot"]][["regex_pars"]]
-  )
+  ) + JASPgraphs::themeJaspRaw()
 	return()
 }
 
@@ -560,7 +600,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
     mcmcResult$samples,
     pars = options[["bayesplot"]][["pars"]],
     regex_pars = options[["bayesplot"]][["regex_pars"]]
-  )
+  ) + JASPgraphs::themeJaspRaw()
 	return()
 }
 
@@ -660,8 +700,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (length(toAdd) > 0L)
     errorMessage <- paste0(errorMessage, "\n\nIn addition:\n", toAdd)
 
-  # kill analysis
-  JASP:::.quitAnalysis(errorMessage)
+  # return error message
+  return(errorMessage)
 }
 
 .JAGSmodelErrorString <- function(counts, chars) {
