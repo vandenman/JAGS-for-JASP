@@ -25,11 +25,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	mcmcResult <- .JAGSrunMCMC(jaspResults, dataset, options)
 
 	# create output
-	.JAGSoutputTable         (jaspResults, options, mcmcResult)
-	.JAGSplotMarginalDensity (jaspResults, options, mcmcResult)
-	.JAGSplotTrace           (jaspResults, options, mcmcResult)
-	.JAGSplotAcf             (jaspResults, options, mcmcResult)
-	.JAGSplotBivariateScatter(jaspResults, options, mcmcResult)
+	.JAGSoutputTable          (jaspResults, options, mcmcResult)
+	.JAGSplotMarginalDensity  (jaspResults, options, mcmcResult)
+	.JAGSplotMarginalHistogram(jaspResults, options, mcmcResult)
+	.JAGSplotTrace            (jaspResults, options, mcmcResult)
+	.JAGSplotAcf              (jaspResults, options, mcmcResult)
+	.JAGSplotBivariateScatter (jaspResults, options, mcmcResult)
 
   return()
 
@@ -37,12 +38,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 .JAGSrunMCMC <- function(jaspResults, dataset, options) {
 
-  if (is.null(jaspResults[["mainContainer"]])) {
-    # setup outer container with all common dependencies
-    mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
-                                                          "nameForN", "parametersMonitored", "parametersShown"))
-    jaspResults[["mainContainer"]] <- mainContainer
-  }
+  # if (is.null(jaspResults[["mainContainer"]])) {
+  #   # setup outer container with all common dependencies
+  #   mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
+  #                                                         "nameForN", "parametersMonitored", "parametersShown"))
+  #   jaspResults[["mainContainer"]] <- mainContainer
+  # }
 
 	if (!is.null(jaspResults[["stateMCMC"]])) {
 	  obj <- jaspResults[["stateMCMC"]]$object
@@ -102,21 +103,41 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 		datList[[options[["nameForN"]]]] <- 0L
 	}
 
+	# Evaluate user R code, terminate early if the code doesn't work
+	inits    <- .JAGSreadRcode(jaspResults, options[["initialValues"]], type = "initial values", noChains = options[["noChains"]])
+	print("inits"); print(str(inits))
+	if (jaspResults[["mainContainer"]]$getError()) return(NULL)
+	userData <- .JAGSreadRcode(jaspResults, options[["userData"]], type = "data")
+	print("userData"); print(str(userData))
+	if (jaspResults[["mainContainer"]]$getError()) return(NULL)
+
+	if (any(names(userData) %in% names(datList))) {
+	  commonNames <- intersect(names(userData), names(datList))
+    jaspResults[["mainContainer"]]$setError(paste(
+      "The following names appeared both in the data set and in the user specified data:\n",
+      commonNames
+    ))
+    return(NULL)
+	} else {
+	  datList <- c(datList, userData)
+	}
+
 	# this code is similar to how R2jags does it, but with
 	# a try around it.
 	e <- try({
 
 		# compile model
-		m <- rjags::jags.model(
+		model <- rjags::jags.model(
 			file     = modelFile,
 			n.chains = noChains,
 			n.adapt  = 0L,
-			data     = datList
+			data     = datList,
+			inits    = inits#unname(lapply(inits, list))
 		)
 
 		# sample burnin
 		rjags::adapt(
-			object         = m,
+			object         = model,
 			n.iter         = noBurnin,
 			by             = 0L,
 			progress.bar   = "none",
@@ -125,7 +146,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 		# sample remainder
 		samples <- rjags::coda.samples(
-			model          = m,
+			model          = model,
 			variable.names = parametersToSave,
 			n.iter         = noSamples,
 			thin           = noThinning,
@@ -142,41 +163,27 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 		}
 		fit$summary <- cbind(fit$statistics, fit$quantiles)
 
-		# TODO: do this ourselves,
-		# remove dependency on R2jags, make it faster
-		# calculate Rhat immediately if possible
-		# fit <- R2jags:::mcmc2bugs(
-		# 	x          = samples,
-		# 	model.file = modelFile,
-		# 	program    = "jags",
-		# 	DIC        = deviance,
-		# 	DICOutput  = NULL,
-		# 	n.iter     = noSamples + noBurnin,
-		# 	n.burnin   = noBurnin,
-		# 	n.thin     = noThinning
-		# )
 	})
 
 	# if something went wrong, present useful error message
 	if (JASP:::isTryError(e)) {
 	  jaspResults[["mainContainer"]]$setError(.JAGSmodelError(e, pattern, model, options))
-	  fit <- NULL
-	  samples <- NULL
-
+	  return(NULL)
 	}
 
 	out <- list(
-		model              = m,
+		model              = model,
 		BUGSoutput         = fit,
 		parameters.to.save = parametersToSave,
 		model.file         = modelFile,
 		n.iter             = noSamples,
 		DIC                = deviance,
-		samples            = samples
+		samples            = samples,
+		hasUserData        = !is.null(userData)
 	)
 
 	tmp <- createJaspState(object = out)
-	tmp$dependOn(c("model", "noSamples", "noBurnin", "noThinning", "noChains"))
+	tmp$dependOn(c("model", "noSamples", "noBurnin", "noThinning", "noChains", "initialValues", "userData"))
 	jaspResults[["stateMCMC"]] <- tmp
 
 	return(out)
@@ -195,7 +202,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (is.null(jaspResults[["mainContainer"]])) {
     # setup outer container with all common dependencies
     mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
-                                                          "nameForN", "parametersMonitored", "parametersShown"))
+                                                          "nameForN", "parametersMonitored", "parametersShown",
+                                                          "initialValues", "userData"))
     jaspResults[["mainContainer"]] <- mainContainer
   }
 
@@ -420,8 +428,6 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   		options[["parametersToShow"]] <- paramsShownIdx
   	}
   }
-  # print('options[["parametersToShow"]]')
-  # print(options[["parametersToShow"]])
 
   if (is.list(options[["parametersToShow"]])) {
 
@@ -447,31 +453,15 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 .JAGSReadData <- function(options) {
 
-  if (!options[["goodModel"]] || !options[["hasData"]]) return(NULL)
+  if (!options[["goodModel"]] || !options[["hasData"]])
+    return(NULL)
 
-#   model <- options[["model"]]
-#   header <- .readDataSetHeader(all.columns = TRUE)
-#   cnms <- colnames(header)
-#
-#   if (is.null(cnms) || length(cnms) == 0) return(NULL)
-#   cnms <- .unv(cnms)
-#
-#   isInModel <- stringr::str_detect(model, cnms)
-# 	print(isInModel)
-
-  # if (any(isInModel)) {
-  #   varsToRead <- cnms[isInModel]
   varsToRead <- options[["possibleData"]]
   dataset <- .readDataSetToEnd(columns.as.numeric = varsToRead)
-  # print(head(dataset, 1))
-  # } else {
-  #   dataset <- NULL
-  # }
-
   return(dataset)
 }
 
-# Tables ----
+# # Tables ----
 .JAGSoutputTable <- function(jaspResults, options, mcmcResult) {
 
 	tb <- createJaspTable("MCMC summary")
@@ -486,11 +476,10 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	tb$addColumnInfo(name = "97.5%",     title = "Upper",      type = "number", overtitle = ovt)
 	tb$addColumnInfo(name = "rhatPoint", title = "Point est.", type = "number", overtitle = ovt2)
 	tb$addColumnInfo(name = "rhatCI",    title = "Upper CI",   type = "number", overtitle = ovt2)
-	jaspResults[["mainContainer"]][["mainTable"]] <- tb
 
 	if (!is.null(mcmcResult) && !jaspResults[["mainContainer"]]$getError()) {
 
-		if (!options[["hasData"]])
+		if (!options[["hasData"]] && !mcmcResult[["hasUserData"]])
 			tb$addFootnote(message = "No data was supplied, everything was sampled from the priors!", symbol = "&#9888;")
 
 		parametersToShow <- options[["parametersToShow"]]
@@ -545,6 +534,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	if (!is.null(options[["nameForNwarning"]]))
 		tb$addFootnote(message = options[["nameForNwarning"]])
 
+	jaspResults[["mainContainer"]][["mainTable"]] <- tb
+
 	return()
 }
 
@@ -553,16 +544,49 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 	if (!options[["plotDensity"]] || !is.null(jaspResults[["mainContainer"]][["plotMarginalDensity"]])) return()
 
-	plot <- createJaspPlot(title  = "Marginal Density", dependencies = c("plotDensity", "parametersShown"))
-	jaspResults[["mainContainer"]][["plotMarginalDensity"]] <- plot
+	jaspPlot <- createJaspPlot(title  = "Marginal Density", dependencies = c("plotDensity", "parametersShown",
+	                                                                     "aggregateChains"))
+	jaspResults[["mainContainer"]][["plotMarginalDensity"]] <- jaspPlot
   if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
     return()
 
-	# mcmc_dens_chains
-	plot$plotObject <- bayesplot::mcmc_dens(mcmcResult$samples,
-    pars = options[["bayesplot"]][["pars"]],
-    regex_pars = options[["bayesplot"]][["regex_pars"]]
-  ) + JASPgraphs::themeJaspRaw()
+	if (options[["aggregateChains"]]) {
+	  plot <- bayesplot::mcmc_dens(mcmcResult[["samples"]],
+	                               pars = options[["bayesplot"]][["pars"]],
+	                               regex_pars = options[["bayesplot"]][["regex_pars"]]
+	  )
+	} else {
+	  plot <- bayesplot::mcmc_dens_overlay(mcmcResult[["samples"]],
+	                                       pars = options[["bayesplot"]][["pars"]],
+	                                       regex_pars = options[["bayesplot"]][["regex_pars"]]
+	  )
+	}
+	jaspPlot$plotObject <- plot + JASPgraphs::themeJaspRaw()
+	return()
+}
+
+.JAGSplotMarginalHistogram <- function(jaspResults, options, mcmcResult) {
+
+	if (!options[["plotHistogram"]] || !is.null(jaspResults[["mainContainer"]][["plotMarginalHistogram"]])) return()
+
+	jaspPlot <- createJaspPlot(title  = "Marginal Histogram", dependencies = c("plotHistogram", "parametersShown",
+	                                                                       "aggregateChains"))
+	jaspResults[["mainContainer"]][["plotMarginalHistogram"]] <- jaspPlot
+  if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
+    return()
+
+	if (options[["aggregateChains"]]) {
+	  plot <- bayesplot::mcmc_hist(mcmcResult[["samples"]],
+	                               pars = options[["bayesplot"]][["pars"]],
+	                               regex_pars = options[["bayesplot"]][["regex_pars"]]
+	  )
+	} else {
+	  plot <- bayesplot::mcmc_hist_by_chain(mcmcResult[["samples"]],
+	                                       pars = options[["bayesplot"]][["pars"]],
+	                                       regex_pars = options[["bayesplot"]][["regex_pars"]]
+	  )
+	}
+	jaspPlot$plotObject <- plot + JASPgraphs::themeJaspRaw()
 	return()
 }
 
@@ -570,17 +594,13 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 	if (!options[["plotTrace"]] || !is.null(jaspResults[["mainContainer"]][["plotTrace"]])) return()
 
-	plot <- createJaspPlot(title  = "Trace plots", dependencies = c("plotTrace", "parametersShown"))
-  jaspResults[["mainContainer"]][["plotTrace"]] <- plot
+	jaspPlot <- createJaspPlot(title  = "Trace plots", dependencies = c("plotTrace", "parametersShown"))
+  jaspResults[["mainContainer"]][["plotTrace"]] <- jaspPlot
   if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
     return()
 
-  # plotObject <- bayesplot::mcmc_trace(mcmcResult$samples,
-  #   pars = options[["bayesplot"]][["pars"]],
-  #   regex_pars = options[["bayesplot"]][["regex_pars"]]
-  # ) + JASPgraphs::themeJaspRaw()
   # plot$width <- 320 *
-  plot$plotObject <- bayesplot::mcmc_trace(mcmcResult$samples,
+  jaspPlot$plotObject <- bayesplot::mcmc_trace(mcmcResult[["samples"]],
     pars = options[["bayesplot"]][["pars"]],
     regex_pars = options[["bayesplot"]][["regex_pars"]]
   ) + JASPgraphs::themeJaspRaw()
@@ -591,12 +611,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 	if (!options[["plotAutoCor"]] || !is.null(jaspResults[["mainContainer"]][["plotAutoCor"]])) return()
 
-	plot <- createJaspPlot(title = "Autocorrelation plot", dependencies = c("plotAutoCor", "parametersShown"))
-  jaspResults[["mainContainer"]][["plotAutoCor"]] <- plot
+	jaspPlot <- createJaspPlot(title = "Autocorrelation plot", dependencies = c("plotAutoCor", "parametersShown"))
+  jaspResults[["mainContainer"]][["plotAutoCor"]] <- jaspPlot
   if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
     return()
 
-  plot$plotObject <- bayesplot::mcmc_acf(
+  jaspPlot$plotObject <- bayesplot::mcmc_acf(
     mcmcResult$samples,
     pars = options[["bayesplot"]][["pars"]],
     regex_pars = options[["bayesplot"]][["regex_pars"]]
@@ -608,39 +628,25 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 	if (!options[["plotBivarHex"]] || !is.null(jaspResults[["mainContainer"]][["plotBivarHex"]])) return()
 
-  plot <- createJaspPlot(title  = "Bivariate Scatter Plot", dependencies = c("plotBivarHex", "parametersShown"))
-  jaspResults[["mainContainer"]][["plotBivarHex"]] <- plot
+  jaspPlot <- createJaspPlot(title  = "Bivariate Scatter Plot", dependencies = c("plotBivarHex", "parametersShown"))
+  jaspResults[["mainContainer"]][["plotBivarHex"]] <- jaspPlot
   if (is.null(mcmcResult))
     return()
 
   if (length(options[["parametersToShow"]]) >= 2L) {
     png(f <- tempfile())
-    plot$plotObject <- bayesplot::mcmc_pairs(
+    plot <- bayesplot::mcmc_pairs(
       mcmcResult[["samples"]],
       pars = options[["bayesplot"]][["pars"]],
       regex_pars = options[["bayesplot"]][["regex_pars"]]
-    )
-    # if (is.list(options[["parametersToShow"]])) {
-    #   plot$plotObject <- bayesplot::mcmc_pairs(mcmcResult[["samples"]], pars = unlist(options[["parametersToShow"]]))
-    # } else {
-    #   plot$plotObject <- bayesplot::mcmc_pairs(mcmcResult[["samples"]], regex_pars = options[["parametersToShow"]])
-    # }
+    )# + JASPgraphs::themeJaspRaw()
     if (file.exists(f)) file.remove(f)
+    jaspPlot$plotObject <- plot
   } else {
-    plot$setError("At least two parameters need to be monitored and shown to make a bivariate scatter plot!")
+    jaspPlot$setError("At least two parameters need to be monitored and shown to make a bivariate scatter plot!")
   }
 	return()
 }
-
-# checkJAGSModel <- function(model, availableVars) {
-#
-#     # function returns informative printable string if there is an error, else ""
-#     if (model == "") return("Enter a model")
-#
-#
-#     # if checks pass, return empty string
-#     return("")
-# }
 
 # Errors ----
 .extractJAGSErrorMessage <- function(error) {
@@ -719,3 +725,21 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 # helper functions ----
 .JAGSisPureNumber <- function(x) suppressWarnings(!is.na(as.numeric(x)))
+
+.JAGSreadRcode <- function(jaspResults, string, type = c("initial values", "data"), noChains = 1L) {
+  type <- match.arg(type)
+  if (type == "initial values")
+    string <- stringr::str_replace_all(string, "\"No. chains\"", as.character(noChains))
+
+  obj <- try(eval(parse(text = string)))
+  if (JASP:::isTryError(obj))
+    jaspResults[["mainContainer"]]$setError(JASP:::.extractErrorMessage(obj))
+  else if (!is.list(obj) && !is.null(obj)) {
+    jaspResults[["mainContainer"]]$setError("The result of %s R code should be a list but it was a %s",
+                                            type, paste(class(obj), collapse = ","))
+  } else {
+    return(obj)
+  }
+  # if something was wrong we end up here
+  return(NULL)
+}

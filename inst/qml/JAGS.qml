@@ -28,7 +28,7 @@ Form
 	{
 		title: qsTr("Enter JAGS model below")
 		name: "model"
-		textType: "JAGS"
+		textType: "model"
         text: "model{\n\n}"
 	}
 
@@ -37,23 +37,31 @@ Form
         TextField { name: "nameForN";               label: qsTr("Name for sample size"); placeholderText: qsTr("n")      }
         TextField { name: "parametersMonitored";    label: qsTr("Parameters Monitored"); text: "$ALL"   }
         TextField { name: "parametersShown";        label: qsTr("Parameters Shown")    ;                }
+        CheckBox  { name: "aggregateChains";        label: qsTr("Aggregate chains for densities and histograms"); checked:true   }
     }
 
     Group
     {
         columns: 2
-
-    
         Group
         {
-            CheckBox { label: qsTr("Trace plots");              name: "plotTrace"   }
-            CheckBox { label: qsTr("Density plots");            name: "plotDensity" }
-            CheckBox { label: qsTr("Autocorrelation plots");    name: "plotAutoCor" }
-            CheckBox { label: qsTr("Bivariate scatter plots");  name: "plotBivarHex"}
+            title: qsTr("Plot")
+//            CheckBox { label: qsTr("Trace plots");              name: "plotTrace"       }           
+//            CheckBox { label: qsTr("Density plots");            name: "plotDensity"     }
+//            CheckBox { label: qsTr("Histogram plots");          name: "plotHistogram"   }
+//            CheckBox { label: qsTr("Autocorrelation plots");    name: "plotAutoCor"     }
+//            CheckBox { label: qsTr("Bivariate scatter plots");  name: "plotBivarHex"    }
+            CheckBox { label: qsTr("Trace");              name: "plotTrace"       }           
+            CheckBox { label: qsTr("Density");            name: "plotDensity"     }
+            CheckBox { label: qsTr("Histogram");          name: "plotHistogram"   }
+            CheckBox { label: qsTr("Autocorrelation");    name: "plotAutoCor"     }
+            CheckBox { label: qsTr("Bivariate scatter");  name: "plotBivarHex"    }
         }
+        
     
         Group
         {
+            title: qsTr("MCMC parameters")
             IntegerField
             {
                 name: "noSamples"
@@ -96,35 +104,7 @@ Form
         {
             CheckBox { label: qsTr("Monitor Deviance"); name: "monitorDeviance"}
             CheckBox { label: qsTr("Monitor DIC"); name: "monitorDIC"}
-        }
-        
-//        RadioButtonGroup
-//        {
-//            name: "shownParameters"
-//            title: qsTr("Posterior Samples")
-//            RadioButton { value: "limited";  	label: qsTr("limited"); checked: true }
-//            RadioButton { value: "unlimited";	label: qsTr("unlimited"); }
-//        }
-        
-//        Group
-//        {
-//            IntegerField
-//            {
-//                name: "numShownParamsFrom"
-//                label: qsTr("numShownParamsFrom")
-//                defaultValue: 10
-//                min: 1
-//                max: 1e9
-//            }
-//            IntegerField
-//            {
-//                name: "numShownParamsTo"
-//                label: qsTr("numShownParamsTo")
-//                defaultValue: 100
-//                min: 1
-//                max: 1e9
-//            }
-//        }
+        }      
     }
     
     Section
@@ -134,7 +114,13 @@ Form
         {
             title: qsTr("Enter initial values as an R list")
             name: "initialValues"
-            textType: "JAGS"
+            textType: "Rcode"
+            text: qsTr("# Example of initial values for unknown mean and standard deviation:\n" +
+                       "# replicate(\"No. chains\", list(list(\n" +
+                       "#   mu = rnorm(1),\n" +
+                       "#   sigma = abs(rnorm(1)),\n" +
+                       "# )))"
+                       )
         }
     }
 
@@ -145,7 +131,13 @@ Form
         {
             title: qsTr("Enter data as an R list")
             name: "userData"
-            textType: "JAGS"
+            textType: "Rcode"
+            text: qsTr( "# A Binomial example:\n" + 
+                        "# list(\n" +
+                        "#   k = 5,\n" +
+                        "#   n = 10\n" +
+                        "# )"
+                      )
         }
     }
 }
