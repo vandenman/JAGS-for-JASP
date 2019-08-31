@@ -18,6 +18,7 @@
 //	  {"package": "rjags", "version": "4.8"},
 //	  {"package": "coda"},
 //	  {"package": "stringr"}
+//	  {"package": "hexbin"}
 //	],
 
 	"menu":

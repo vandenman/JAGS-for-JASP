@@ -34,10 +34,32 @@ Form
 
     Group
     {
-        TextField { name: "nameForN";               label: qsTr("Name for sample size"); placeholderText: qsTr("n")      }
+
+        VariablesForm
+        {
+            height: 200
+            AvailableVariablesList  { name: "parametersList";            title: qsTr("Parameters in model");}
+            AssignedVariablesList   { name: "monitoredParametersList";   title: qsTr("Monitor these parameters"); }
+        }
+
+        RadioButtonGroup
+        {
+            name: "showResultsFor"
+            title: qsTr("Show results for")
+            RadioButton { value: "monitorAllParameters";        label: qsTr("all monitored parameters"); checked: true; id:monitoredParameters  }
+            RadioButton { value: "monitorSelectedParameters";   label: qsTr("selected parameters")                                              }
+        }
+
+        VariablesForm
+        {
+            height: 200
+            visible: !monitoredParameters.checked
+            AvailableVariablesList  { name: "monitoredParametersList2"; title: qsTr("Monitored parameters"); source: ["monitoredParametersList"]}
+            AssignedVariablesList   { name: "parametersShown0";         title: qsTr("Show results for these parameters")}
+        }
+
         TextField { name: "parametersMonitored";    label: qsTr("Parameters Monitored"); text: "$ALL"   }
         TextField { name: "parametersShown";        label: qsTr("Parameters Shown")    ;                }
-        CheckBox  { name: "aggregateChains";        label: qsTr("Aggregate chains for densities and histograms"); checked:true   }
     }
 
     Group
@@ -45,20 +67,49 @@ Form
         columns: 2
         Group
         {
-            title: qsTr("Plot")
-//            CheckBox { label: qsTr("Trace plots");              name: "plotTrace"       }           
-//            CheckBox { label: qsTr("Density plots");            name: "plotDensity"     }
-//            CheckBox { label: qsTr("Histogram plots");          name: "plotHistogram"   }
-//            CheckBox { label: qsTr("Autocorrelation plots");    name: "plotAutoCor"     }
-//            CheckBox { label: qsTr("Bivariate scatter plots");  name: "plotBivarHex"    }
-            CheckBox { label: qsTr("Trace");              name: "plotTrace"       }           
-            CheckBox { label: qsTr("Density");            name: "plotDensity"     }
-            CheckBox { label: qsTr("Histogram");          name: "plotHistogram"   }
-            CheckBox { label: qsTr("Autocorrelation");    name: "plotAutoCor"     }
-            CheckBox { label: qsTr("Bivariate scatter");  name: "plotBivarHex"    }
+            title: qsTr("Plots")
+            CheckBox { name: "aggregateChains";        label: qsTr("Aggregate chains for densities and histograms"); checked:true   }
+            CheckBox { label: qsTr("Trace");              name: "plotTrace"                             }
+            CheckBox { label: qsTr("Density");            name: "plotDensity"                           }
+            CheckBox { label: qsTr("Histogram");          name: "plotHistogram"                         }
+            CheckBox { label: qsTr("Autocorrelation");    name: "plotAutoCor"; id: autoCorrelation
+                IntegerField
+                {
+                    visible: autoCorrelation.checked
+                    name: "noLags"
+                    label: qsTr("No. lags")
+                    defaultValue: 20
+                    min: 1
+                    max: 100
+                }
+                RadioButtonGroup
+                {
+                    visible: autoCorrelation.checked
+                    name: "acfType"
+                    title: qsTr("Type")
+                    RadioButton { value: "acfLines";  label: qsTr("line"); checked:true }
+                    RadioButton { value: "acfBars";   label: qsTr("bar")                }
+                }
+            }
+            CheckBox { label: qsTr("Bivariate scatter");  name: "plotBivarHex"; id: bivariateScatter
+                RadioButtonGroup
+                {
+                    visible: bivariateScatter.checked
+                    name: "bivariateScatterDiagType"
+                    title: qsTr("Diagonal plot type")
+                    RadioButton { value: "dens";  label: qsTr("Density"); checked:true  }
+                    RadioButton { value: "hist";  label: qsTr("Histogram")              }
+                }
+                RadioButtonGroup
+                {
+                    visible: bivariateScatter.checked
+                    name: "bivariateScatterOffDiagType"
+                    title: qsTr("Off-diagonal plot type")
+                    RadioButton { value: "hex";     label: qsTr("Hexagonal histogram"); checked:true}
+                    RadioButton { value: "scatter"; label: qsTr("Scatter plot")                     }
+                }
+            }
         }
-        
-    
         Group
         {
             title: qsTr("MCMC parameters")
@@ -69,6 +120,7 @@ Form
                 defaultValue: 2e3
                 min: 10
                 max: 1e9
+                fieldWidth: 100
             }
             IntegerField
             {
@@ -77,14 +129,16 @@ Form
                 defaultValue: 500
                 min: 1
                 max: 1e9
+                fieldWidth: 100
             }
             IntegerField
             {
                 name: "noThinning"
-                label: qsTr("thinning")
+                label: qsTr("Thinning")
                 defaultValue: 1
                 min: 1
                 max: 1e9
+                fieldWidth: 100
             }
             IntegerField
             {
@@ -93,18 +147,9 @@ Form
                 defaultValue: 3
                 min: 1
                 max: 50
+                fieldWidth: 100
             }
         }
-    }
-    
-    Section
-    {
-        title: qsTr("Advanced")
-        Group
-        {
-            CheckBox { label: qsTr("Monitor Deviance"); name: "monitorDeviance"}
-            CheckBox { label: qsTr("Monitor DIC"); name: "monitorDIC"}
-        }      
     }
     
     Section
@@ -138,6 +183,31 @@ Form
                         "#   n = 10\n" +
                         "# )"
                       )
+        }
+    }
+
+    Section
+    {
+        title: qsTr("Advanced")
+        columns: 2
+        TextField { name: "nameForN";               label: qsTr("Name for sample size"); placeholderText: qsTr("n")      }
+        Group
+        {
+            CheckBox { label: qsTr("Monitor Deviance"); name: "monitorDeviance"}
+            CheckBox { label: qsTr("Monitor DIC"); name: "monitorDIC"}
+        }
+
+        DropDown {
+            name: "colorScheme"
+            indexDefaultValue: 0
+            label: qsTr("Color scheme for plots:")
+            values:
+            [
+                { label: "Colorblind",  value: "Colorblind"},
+                { label: "Viridis",     value: "Viridis"},
+                { label: "Blue",        value: "blue"},
+                { label: "Gray",        value: "gray"}
+            ]
         }
     }
 }

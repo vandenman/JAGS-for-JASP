@@ -25,12 +25,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	mcmcResult <- .JAGSrunMCMC(jaspResults, dataset, options)
 
 	# create output
-	.JAGSoutputTable          (jaspResults, options, mcmcResult)
-	.JAGSplotMarginalDensity  (jaspResults, options, mcmcResult)
-	.JAGSplotMarginalHistogram(jaspResults, options, mcmcResult)
-	.JAGSplotTrace            (jaspResults, options, mcmcResult)
-	.JAGSplotAcf              (jaspResults, options, mcmcResult)
-	.JAGSplotBivariateScatter (jaspResults, options, mcmcResult)
+	.JAGSoutputTable(jaspResults, options, mcmcResult)
+	.JAGSmcmcPlots  (jaspResults, options, mcmcResult)
 
   return()
 
@@ -105,10 +101,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 	# Evaluate user R code, terminate early if the code doesn't work
 	inits    <- .JAGSreadRcode(jaspResults, options[["initialValues"]], type = "initial values", noChains = options[["noChains"]])
-	print("inits"); print(str(inits))
 	if (jaspResults[["mainContainer"]]$getError()) return(NULL)
 	userData <- .JAGSreadRcode(jaspResults, options[["userData"]], type = "data")
-	print("userData"); print(str(userData))
 	if (jaspResults[["mainContainer"]]$getError()) return(NULL)
 
 	if (any(names(userData) %in% names(datList))) {
@@ -154,14 +148,17 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 			progress.bar   = "none"
 		)
 
+		# rjags::dic.samples(model, noSamples)
+
 		fit <- coda:::summary.mcmc.list(samples, quantiles = c(0.025, 0.5, 0.975))
+		neff <- coda::effectiveSize(samples)
 
 		# if we only one have one parameters, ensure objects are still matrices with rownames, etc.
 		if (length(parametersToSave) == 1L) {
 			fit$statistics <- matrix(fit$statistics, 1L, dimnames = list(parametersToSave, names(fit$statistics)))
-			fit$quantiles  <- matrix(fit$quantiles, 1L, dimnames = list(parametersToSave, names(fit$quantiles)))
+			fit$quantiles  <- matrix(fit$quantiles,  1L, dimnames = list(parametersToSave, names(fit$quantiles)))
 		}
-		fit$summary <- cbind(fit$statistics, fit$quantiles)
+		fit$summary <- cbind(fit$statistics, fit$quantiles, neff)
 
 	})
 
@@ -468,14 +465,15 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	tb$position <- 1L
 	ovt  <- "95% Credible Interval"
 	ovt2 <- "Rhat"
-	tb$addColumnInfo(name = "parameter", title = "Parameter",  type = "string")
-	tb$addColumnInfo(name = "Mean",      title = "mean",       type = "number")
-	tb$addColumnInfo(name = "SD",        title = "sd",         type = "number")
-	tb$addColumnInfo(name = "50%",       title = "median",     type = "number")
-	tb$addColumnInfo(name = "2.5%",      title = "Lower",      type = "number", overtitle = ovt)
-	tb$addColumnInfo(name = "97.5%",     title = "Upper",      type = "number", overtitle = ovt)
-	tb$addColumnInfo(name = "rhatPoint", title = "Point est.", type = "number", overtitle = ovt2)
-	tb$addColumnInfo(name = "rhatCI",    title = "Upper CI",   type = "number", overtitle = ovt2)
+	tb$addColumnInfo(name = "parameter", title = "Parameter",            type = "string")
+	tb$addColumnInfo(name = "Mean",      title = "mean",                 type = "number")
+	tb$addColumnInfo(name = "SD",        title = "sd",                   type = "number")
+	tb$addColumnInfo(name = "50%",       title = "median",               type = "number")
+	tb$addColumnInfo(name = "2.5%",      title = "Lower",                type = "number", overtitle = ovt)
+	tb$addColumnInfo(name = "97.5%",     title = "Upper",                type = "number", overtitle = ovt)
+	tb$addColumnInfo(name = "rhatPoint", title = "Point est.",           type = "number", overtitle = ovt2)
+	tb$addColumnInfo(name = "rhatCI",    title = "Upper CI",             type = "number", overtitle = ovt2)
+	tb$addColumnInfo(name = "neff",      title = "Effecive Sample Size", type = "number")
 
 	if (!is.null(mcmcResult) && !jaspResults[["mainContainer"]]$getError()) {
 
@@ -507,7 +505,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 
 		tb[["parameter"]] <- nms[idx]
-		for (name in c("Mean", "SD", "50%", "2.5%", "97.5%"))
+		for (name in c("Mean", "SD", "50%", "2.5%", "97.5%", "neff"))
 			tb[[name]] <- sum[idx, name]
 
 		noChains <- options[["noChains"]]
@@ -540,14 +538,47 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 }
 
 # Plots ----
-.JAGSplotMarginalDensity <- function(jaspResults, options, mcmcResult) {
+.JAGSmcmcPlots <- function(jaspResults, options, mcmcResult) {
 
-	if (!options[["plotDensity"]] || !is.null(jaspResults[["mainContainer"]][["plotMarginalDensity"]])) return()
+  if (is.null(jaspResults[["mainContainer"]][["plotContainer"]])) {
+    plotContainer <- createJaspContainer(dependencies = c("parametersShown", "colorScheme"))
+    jaspResults[["mainContainer"]][["plotContainer"]] <- plotContainer
+  } else {
+    plotContainer <- jaspResults[["mainContainer"]][["plotContainer"]]
+  }
 
-	jaspPlot <- createJaspPlot(title  = "Marginal Density", dependencies = c("plotDensity", "parametersShown",
-	                                                                     "aggregateChains"))
-	jaspResults[["mainContainer"]][["plotMarginalDensity"]] <- jaspPlot
-  if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
+  .JAGSsetPlotTheme(options)
+  .JAGSplotMarginalDensity  (plotContainer, options, mcmcResult)
+  .JAGSplotMarginalHistogram(plotContainer, options, mcmcResult)
+  .JAGSplotTrace            (plotContainer, options, mcmcResult)
+  .JAGSplotAcf              (plotContainer, options, mcmcResult)
+  .JAGSplotBivariateScatter (plotContainer, options, mcmcResult)
+
+
+  return(NULL)
+}
+
+.JAGSsetPlotTheme <- function(options) {
+  colorScheme <- switch(
+    options[["colorScheme"]],
+    "blue"    = "blue",
+    "gray"    = "gray",
+    "Viridis" = "viridis",
+    "brewer-Dark2"
+  )
+  bayesplot::color_scheme_set(colorScheme)
+  bayesplot::bayesplot_theme_set(new = JASPgraphs::themeJaspRaw())
+  return(NULL)
+}
+
+.JAGSplotMarginalDensity <- function(plotContainer, options, mcmcResult) {
+
+	if (!options[["plotDensity"]] || !is.null(plotContainer[["plotMarginalDensity"]])) return()
+
+	jaspPlot <- createJaspPlot(title  = "Marginal Density", position = 1,
+	                           dependencies = c("plotDensity", "aggregateChains"))
+	plotContainer[["plotMarginalDensity"]] <- jaspPlot
+  if (is.null(mcmcResult) || plotContainer$getError())
     return()
 
 	if (options[["aggregateChains"]]) {
@@ -565,14 +596,14 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	return()
 }
 
-.JAGSplotMarginalHistogram <- function(jaspResults, options, mcmcResult) {
+.JAGSplotMarginalHistogram <- function(plotContainer, options, mcmcResult) {
 
-	if (!options[["plotHistogram"]] || !is.null(jaspResults[["mainContainer"]][["plotMarginalHistogram"]])) return()
+	if (!options[["plotHistogram"]] || !is.null(plotContainer[["plotMarginalHistogram"]])) return()
 
-	jaspPlot <- createJaspPlot(title  = "Marginal Histogram", dependencies = c("plotHistogram", "parametersShown",
-	                                                                       "aggregateChains"))
-	jaspResults[["mainContainer"]][["plotMarginalHistogram"]] <- jaspPlot
-  if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
+	jaspPlot <- createJaspPlot(title  = "Marginal Histogram",  position = 2,
+	                           dependencies = c("plotHistogram", "aggregateChains"))
+	plotContainer[["plotMarginalHistogram"]] <- jaspPlot
+  if (is.null(mcmcResult) || plotContainer$getError())
     return()
 
 	if (options[["aggregateChains"]]) {
@@ -590,13 +621,14 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	return()
 }
 
-.JAGSplotTrace <- function(jaspResults, options, mcmcResult) {
+.JAGSplotTrace <- function(plotContainer, options, mcmcResult) {
 
-	if (!options[["plotTrace"]] || !is.null(jaspResults[["mainContainer"]][["plotTrace"]])) return()
+	if (!options[["plotTrace"]] || !is.null(plotContainer[["plotTrace"]])) return()
 
-	jaspPlot <- createJaspPlot(title  = "Trace plots", dependencies = c("plotTrace", "parametersShown"))
-  jaspResults[["mainContainer"]][["plotTrace"]] <- jaspPlot
-  if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
+	jaspPlot <- createJaspPlot(title  = "Trace Plots",  position = 3,
+	                           dependencies = c("plotTrace", "parametersShown"))
+	plotContainer[["plotTrace"]] <- jaspPlot
+  if (is.null(mcmcResult) || plotContainer$getError())
     return()
 
   # plot$width <- 320 *
@@ -607,30 +639,40 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	return()
 }
 
-.JAGSplotAcf <- function(jaspResults, options, mcmcResult) {
+.JAGSplotAcf <- function(plotContainer, options, mcmcResult) {
 
-	if (!options[["plotAutoCor"]] || !is.null(jaspResults[["mainContainer"]][["plotAutoCor"]])) return()
+	if (!options[["plotAutoCor"]] || !is.null(plotContainer[["plotAutoCor"]])) return()
 
-	jaspPlot <- createJaspPlot(title = "Autocorrelation plot", dependencies = c("plotAutoCor", "parametersShown"))
-  jaspResults[["mainContainer"]][["plotAutoCor"]] <- jaspPlot
-  if (is.null(mcmcResult) || jaspResults[["mainContainer"]]$getError())
+	jaspPlot <- createJaspPlot(title = "Autocorrelation Plot",  position = 4,
+	                           dependencies = c("plotAutoCor", "parametersShown", "noLags", "acfType"))
+	plotContainer[["plotAutoCor"]] <- jaspPlot
+  if (is.null(mcmcResult) || plotContainer$getError())
     return()
 
-  jaspPlot$plotObject <- bayesplot::mcmc_acf(
+  if (options[["acfType"]] == "acfLines") {
+    plotfun <- bayesplot::mcmc_acf
+  } else {
+    plotfun <- bayesplot::mcmc_acf_bar
+  }
+
+  jaspPlot$plotObject <- plotfun(
     mcmcResult$samples,
     pars = options[["bayesplot"]][["pars"]],
-    regex_pars = options[["bayesplot"]][["regex_pars"]]
+    regex_pars = options[["bayesplot"]][["regex_pars"]],
+    lags = options[["noLags"]]
   ) + JASPgraphs::themeJaspRaw()
 	return()
 }
 
-.JAGSplotBivariateScatter <- function(jaspResults, options, mcmcResult) {
+.JAGSplotBivariateScatter <- function(plotContainer, options, mcmcResult) {
 
-	if (!options[["plotBivarHex"]] || !is.null(jaspResults[["mainContainer"]][["plotBivarHex"]])) return()
+	if (!options[["plotBivarHex"]] || !is.null(plotContainer[["plotBivarHex"]])) return()
 
-  jaspPlot <- createJaspPlot(title  = "Bivariate Scatter Plot", dependencies = c("plotBivarHex", "parametersShown"))
-  jaspResults[["mainContainer"]][["plotBivarHex"]] <- jaspPlot
-  if (is.null(mcmcResult))
+  jaspPlot <- createJaspPlot(title  = "Bivariate Scatter Plot",  position = 5,
+                             dependencies = c("plotBivarHex", "parametersShown", "bivariateScatterDiagType",
+                                              "bivariateScatterOffDiagType"))
+  plotContainer[["plotBivarHex"]] <- jaspPlot
+  if (is.null(mcmcResult) || plotContainer$getError())
     return()
 
   if (length(options[["parametersToShow"]]) >= 2L) {
@@ -638,7 +680,9 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
     plot <- bayesplot::mcmc_pairs(
       mcmcResult[["samples"]],
       pars = options[["bayesplot"]][["pars"]],
-      regex_pars = options[["bayesplot"]][["regex_pars"]]
+      regex_pars = options[["bayesplot"]][["regex_pars"]],
+      diag_fun = options[["bivariateScatterDiagType"]],
+      off_diag_fun = options[["bivariateScatterOffDiagType"]]
     )# + JASPgraphs::themeJaspRaw()
     if (file.exists(f)) file.remove(f)
     jaspPlot$plotObject <- plot
@@ -731,6 +775,9 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (type == "initial values")
     string <- stringr::str_replace_all(string, "\"No. chains\"", as.character(noChains))
 
+  # this shouldn't be possible, but if string = NULL, parse prompts for user input.
+  if (is.null(string))
+    return(NULL)
   obj <- try(eval(parse(text = string)))
   if (JASP:::isTryError(obj))
     jaspResults[["mainContainer"]]$setError(JASP:::.extractErrorMessage(obj))
@@ -743,3 +790,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   # if something was wrong we end up here
   return(NULL)
 }
+
+
+# useful!
+# rjags::jags.version()
+# rjags:::
