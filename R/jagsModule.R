@@ -34,13 +34,6 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 .JAGSrunMCMC <- function(jaspResults, dataset, options) {
 
-  # if (is.null(jaspResults[["mainContainer"]])) {
-  #   # setup outer container with all common dependencies
-  #   mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
-  #                                                         "nameForN", "parametersMonitored", "parametersShown"))
-  #   jaspResults[["mainContainer"]] <- mainContainer
-  # }
-
 	if (!is.null(jaspResults[["stateMCMC"]])) {
 	  obj <- jaspResults[["stateMCMC"]]$object
 
@@ -86,7 +79,6 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	datList <- as.list(dataset)
 	if (options[["hasData"]]) {
 
-		datList[[options[["nameForN"]]]] <- nrow(dataset)
 		deviance <- TRUE
 
 		# convention: deviance is first parameter!
@@ -96,7 +88,6 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 		rjags::load.module("dic", quiet = TRUE)
 	} else {
 		deviance <- FALSE
-		datList[[options[["nameForN"]]]] <- 0L
 	}
 
 	# Evaluate user R code, terminate early if the code doesn't work
@@ -181,6 +172,8 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 	tmp <- createJaspState(object = out)
 	tmp$dependOn(c("model", "noSamples", "noBurnin", "noThinning", "noChains", "initialValues", "userData"))
+	if (options[["showResultsFor"]] == "monitorAllParameters")
+	  tmp$dependOn("parametersShown")
 	jaspResults[["stateMCMC"]] <- tmp
 
 	return(out)
@@ -199,9 +192,13 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   if (is.null(jaspResults[["mainContainer"]])) {
     # setup outer container with all common dependencies
     mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
-                                                          "nameForN", "parametersMonitored", "parametersShown",
-                                                          "initialValues", "userData"))
+                                                          "parametersMonitored", "parametersShown", "initialValues", "userData"))
     jaspResults[["mainContainer"]] <- mainContainer
+  }
+
+  if (isTRUE(rjags::jags.version() < 4.30)) {
+    jaspResults[["mainContainer"]]$setError(paste("Expected JAGS version 4.3.0 but found", as.character(rjags::jags.version())))
+    return(options)
   }
 
   model <- trimws(options[["model"]])
@@ -212,16 +209,12 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
     return(options)
   }
 
-  if (identical(options[["parametersMonitored"]], ""))
+  if (length(options[["parametersShown"]]) == 0L)
+    jaspResults[["mainContainer"]]$setError("Please specify which parameters to show output for!")
+
+  if (identical(options[["showResultsFor"]], "monitorSelectedParameters") && identical(options[["parametersMonitored"]], ""))
     jaspResults[["mainContainer"]]$setError("Please specify which parameters to monitor!")
 
-  if (is.null(options[["nameForN"]]) || identical(options[["nameForN"]], "")) {
-  	options[["nameForN"]] <- "n"
-  	options[["nameForNwarning"]] <- "Symbol for number of rows not understood. Using 'n' as fallback."
-  }
-
-  # dat0 <- read.csv("~/GitHub/jasp-desktop/Resources/Data Sets/debug.csv")
-  # header <- dat0[0, , drop = FALSE]
   header <- .readDataSetHeader(all.columns = TRUE)
   cnms <- colnames(header)
   hasCnms <- !(is.null(cnms) || length(cnms) == 0L)
@@ -268,9 +261,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 		options[["possibleTypos"]] <- r
 
   } else {
-
   	possibleData <- NULL
-
   }
 
   # do we need these?
@@ -278,153 +269,157 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   options[["possibleData"]]   <- possibleData
   options[["hasData"]]        <- length(possibleData) > 0
 
-  # parameters to store samples from in JAGS
-  if (identical(options[["parametersMonitored"]], "$ALL")) {
-    # special keyword - monitor all parameters
-  	options[["parametersToSave"]] <- possibleParams
-  } else if (identical(options[["parametersMonitored"]], "")) {
-    options[["goodModel"]] <- FALSE
-    return(options)
-  } else { # user specified - check for errors
+  options[["parametersToShow"]] <- options[["parametersShown"]]
+  options[["parametersToSave"]] <- options[["parametersShown"]]
 
-    # check if parameters to monitor are a subset of possibleParams
-    # change input string into sepate words
-    paramsToSave <- stringr::str_extract_all(options[["parametersMonitored"]], "\\w+")[[1]]
-    diff <- setdiff(paramsToSave, possibleParams) # any mismatches?
-    if (length(diff) > 0L) {
-      msg <- paste0(
-        "The following parameter(s) should be monitored but do not appear in the model!\n",
-        "This happened for:\n\n", paste0(diff, collapse = ", ")
-      )
-      jaspResults[["mainContainer"]]$setError(msg)
-      return(options)
-    } else {
-      # monitors user specified parameters
-      options[["parametersToSave"]] <- paramsToSave
-    }
-  }
+  # old approach
+  # parameters to store samples from in JAGS
+  # if (identical(options[["parametersMonitored"]], "$ALL")) {
+  #   # special keyword - monitor all parameters
+  # 	options[["parametersToSave"]] <- possibleParams
+  # } else if (identical(options[["parametersMonitored"]], "")) {
+  #   options[["goodModel"]] <- FALSE
+  #   return(options)
+  # } else { # user specified - check for errors
+  #
+  #   # check if parameters to monitor are a subset of possibleParams
+  #   # change input string into sepate words
+  #   paramsToSave <- stringr::str_extract_all(options[["parametersMonitored"]], "\\w+")[[1]]
+  #   diff <- setdiff(paramsToSave, possibleParams) # any mismatches?
+  #   if (length(diff) > 0L) {
+  #     msg <- paste0(
+  #       "The following parameter(s) should be monitored but do not appear in the model!\n",
+  #       "This happened for:\n\n", paste0(diff, collapse = ", ")
+  #     )
+  #     jaspResults[["mainContainer"]]$setError(msg)
+  #     return(options)
+  #   } else {
+  #     # monitors user specified parameters
+  #     options[["parametersToSave"]] <- paramsToSave
+  #   }
+  # }
 
   # parameters to actually display stuff for in JASP
-  if (identical(options[["parametersShown"]], "$ALL")) {
-  	options[["parametersToShow"]] <- "$ALL"
-  } else if (!identical(options[["parametersShown"]], "")) { # do some checks..
-
-  	paramsShown <- options[["parametersShown"]]
-  	# change mu[i] to mu
-  	paramsShownBase <- unlist(stringr::str_extract_all(paramsShown, "\\w+"))
-    paramsShownBase <- unique(paramsShownBase[!.JAGSisPureNumber(paramsShownBase)])
-  	# check if all parameters to show are actually monitored
-  	diff <- setdiff(paramsShownBase, options[["parametersToSave"]])
-  	if (length(diff) > 0) {
-  	  msg <- paste0(
-  	    "The following parameter(s) should be shown but are not monitored!\n",
-  	    "This happened for:\n\n", paste(diff, collapse = ", ")
-  	  )
-  	  jaspResults[["mainContainer"]]$setError(msg)
-  	  return(options)
-  	}
-
-
-  	if (all(!grepl("[", paramsShown, fixed = TRUE))) {
-  	  # no subsets! just save the bases
-  	  options[["parametersToShow"]] <- paramsShownBase
-  	} else {
-  	  # save subsets of parameters -- split into subset and non subsets
-
-  	  paramsShown <- unlist(stringr::str_split(paramsShown, " "))
-  		# everything between [...]
-  		paramsShownIdx <- stringr::str_extract_all(paramsShown, "(?<=\\[).+?(?=\\])")
-  		names(paramsShownIdx) <- paramsShown
-  		paramsShownNms <- paramsShownIdx
-  		for (i in seq_along(paramsShownIdx)) {
-  			s <- paramsShownIdx[[i]]
-  			if (length(s) > 0) {
-
-  				# some checks if the user supplied range is actually okay
-
-  				# negative indexing is not supported.
-  				if (grepl("-", s)) {
-  					# yell at user
-  					msg <- sprintf("Negative indexing is not allowed for parameters monitored!\n A problem occured with: %s",
-  												 paramsShown[i])
-  					jaspResults[["mainContainer"]]$setError(msg)
-  					return(options)
-  				}
-
-  			  # if (grepl(""))
-
-  				if (grepl(",", s)) {
-  					# split on , but not if it's inside parentheses ( ), to allow mu[c(1, 2, 3), 1:2]
-  					s <- stringr::str_split(s, "(?![^(]*\\)),")[[1]]
-  				}
-
-          # remove whitespace so we can pattern match easily
-          s <- gsub("[[:space:]]", "", s)
-
-          # match all allowed patterns
-          isIdx    <- suppressWarnings(!is.na(as.numeric(s)))         # sningle index
-          isColon  <- stringr::str_detect(s, "\\d:\\d")               # range  of indices
-          isVector <- stringr::str_detect(s, "c\\([\\d,]{1,}\\)")     # vector of indices
-          # isBind   <- stringr::str_detect(s, "cbind\\([\\d,]{1,}\\)") # different range of indices
-
-          # check if all s match at least one pattern
-          allMatch <- isIdx | isColon | isVector# | isBind
-          if (!all(allMatch)) {
-            msg <- paste0(
-              "Did not understand ", paramsShown[i], ". Input should be either:\n\n",
-              paste(
-                "a single index",
-                "a range of indices (1:2)",
-                "a vector of indices (c(1, 2, 3))",
-                sep = ", or\n"
-              )
-            )
-  					jaspResults[["mainContainer"]]$setError(msg)
-  					return(options)
-
-          }
-
-          # this could be done more nicely
-          allCombs <- try(do.call(expand.grid, lapply(s, function(x) eval(parse(text = x)))))
-          if (isTryError(allCombs)) {
-            msg <- paste0(
-              "Did not understand ", paramsShown[i], ". Input should be either:\n\n",
-              paste(
-                "a single index",
-                "a range of indices (1:2)",
-                "a vector of indices (c(1, 2, 3))",
-                sep = ", or\n"
-              )
-            )
-  					jaspResults[["mainContainer"]]$setError(msg)
-  					return(options)
-          }
-
-          names2lookup <- apply(allCombs, 1, function(x) {
-            paste0(paramsShownBase[i], "[", paste(x, collapse = ","), "]")
-          })
-
-  				paramsShownIdx[[i]] <- names2lookup
-  			} else {
-  				# sanity check -- even though there was no match between [...],
-  				# check that there is not a single '[' or ']'.
-  				str <- names(paramsShownIdx)[i]
-  				countLeft  <- stringr::str_count(str, stringr::fixed("["))
-  				countRight <- stringr::str_count(str, stringr::fixed("]"))
-  				if (countLeft != countRight) {
-
-  					msg <- sprintf("In parameters to show, %s has an additional '[' or ']' (%d vs %d)",
-  																str, countLeft, countRight)
-  					jaspResults[["mainContainer"]]$setError(msg)
-  					return(options)
-
-  				}
-  				paramsShownIdx[[i]] <- str
-  			}
-  		}
-  		options[["parametersToShow"]] <- paramsShownIdx
-  	}
-  }
+  # if (identical(options[["parametersShown"]], "$ALL")) {
+  # 	options[["parametersToShow"]] <- "$ALL"
+  # } else if (!identical(options[["parametersShown"]], "")) { # do some checks..
+  #
+  # 	paramsShown <- options[["parametersShown"]]
+  # 	# change mu[i] to mu
+  # 	paramsShownBase <- unlist(stringr::str_extract_all(paramsShown, "\\w+"))
+  #   paramsShownBase <- unique(paramsShownBase[!.JAGSisPureNumber(paramsShownBase)])
+  # 	# check if all parameters to show are actually monitored
+  # 	diff <- setdiff(paramsShownBase, options[["parametersToSave"]])
+  # 	if (length(diff) > 0) {
+  # 	  msg <- paste0(
+  # 	    "The following parameter(s) should be shown but are not monitored!\n",
+  # 	    "This happened for:\n\n", paste(diff, collapse = ", ")
+  # 	  )
+  # 	  jaspResults[["mainContainer"]]$setError(msg)
+  # 	  return(options)
+  # 	}
+  #
+  #
+  # 	if (all(!grepl("[", paramsShown, fixed = TRUE))) {
+  # 	  # no subsets! just save the bases
+  # 	  options[["parametersToShow"]] <- paramsShownBase
+  # 	} else {
+  # 	  # save subsets of parameters -- split into subset and non subsets
+  #
+  # 	  paramsShown <- unlist(stringr::str_split(paramsShown, " "))
+  # 		# everything between [...]
+  # 		paramsShownIdx <- stringr::str_extract_all(paramsShown, "(?<=\\[).+?(?=\\])")
+  # 		names(paramsShownIdx) <- paramsShown
+  # 		paramsShownNms <- paramsShownIdx
+  # 		for (i in seq_along(paramsShownIdx)) {
+  # 			s <- paramsShownIdx[[i]]
+  # 			if (length(s) > 0) {
+  #
+  # 				# some checks if the user supplied range is actually okay
+  #
+  # 				# negative indexing is not supported.
+  # 				if (grepl("-", s)) {
+  # 					# yell at user
+  # 					msg <- sprintf("Negative indexing is not allowed for parameters monitored!\n A problem occured with: %s",
+  # 												 paramsShown[i])
+  # 					jaspResults[["mainContainer"]]$setError(msg)
+  # 					return(options)
+  # 				}
+  #
+  # 			  # if (grepl(""))
+  #
+  # 				if (grepl(",", s)) {
+  # 					# split on , but not if it's inside parentheses ( ), to allow mu[c(1, 2, 3), 1:2]
+  # 					s <- stringr::str_split(s, "(?![^(]*\\)),")[[1]]
+  # 				}
+  #
+  #         # remove whitespace so we can pattern match easily
+  #         s <- gsub("[[:space:]]", "", s)
+  #
+  #         # match all allowed patterns
+  #         isIdx    <- suppressWarnings(!is.na(as.numeric(s)))         # sningle index
+  #         isColon  <- stringr::str_detect(s, "\\d:\\d")               # range  of indices
+  #         isVector <- stringr::str_detect(s, "c\\([\\d,]{1,}\\)")     # vector of indices
+  #         # isBind   <- stringr::str_detect(s, "cbind\\([\\d,]{1,}\\)") # different range of indices
+  #
+  #         # check if all s match at least one pattern
+  #         allMatch <- isIdx | isColon | isVector# | isBind
+  #         if (!all(allMatch)) {
+  #           msg <- paste0(
+  #             "Did not understand ", paramsShown[i], ". Input should be either:\n\n",
+  #             paste(
+  #               "a single index",
+  #               "a range of indices (1:2)",
+  #               "a vector of indices (c(1, 2, 3))",
+  #               sep = ", or\n"
+  #             )
+  #           )
+  # 					jaspResults[["mainContainer"]]$setError(msg)
+  # 					return(options)
+  #
+  #         }
+  #
+  #         # this could be done more nicely
+  #         allCombs <- try(do.call(expand.grid, lapply(s, function(x) eval(parse(text = x)))))
+  #         if (isTryError(allCombs)) {
+  #           msg <- paste0(
+  #             "Did not understand ", paramsShown[i], ". Input should be either:\n\n",
+  #             paste(
+  #               "a single index",
+  #               "a range of indices (1:2)",
+  #               "a vector of indices (c(1, 2, 3))",
+  #               sep = ", or\n"
+  #             )
+  #           )
+  # 					jaspResults[["mainContainer"]]$setError(msg)
+  # 					return(options)
+  #         }
+  #
+  #         names2lookup <- apply(allCombs, 1, function(x) {
+  #           paste0(paramsShownBase[i], "[", paste(x, collapse = ","), "]")
+  #         })
+  #
+  # 				paramsShownIdx[[i]] <- names2lookup
+  # 			} else {
+  # 				# sanity check -- even though there was no match between [...],
+  # 				# check that there is not a single '[' or ']'.
+  # 				str <- names(paramsShownIdx)[i]
+  # 				countLeft  <- stringr::str_count(str, stringr::fixed("["))
+  # 				countRight <- stringr::str_count(str, stringr::fixed("]"))
+  # 				if (countLeft != countRight) {
+  #
+  # 					msg <- sprintf("In parameters to show, %s has an additional '[' or ']' (%d vs %d)",
+  # 																str, countLeft, countRight)
+  # 					jaspResults[["mainContainer"]]$setError(msg)
+  # 					return(options)
+  #
+  # 				}
+  # 				paramsShownIdx[[i]] <- str
+  # 			}
+  # 		}
+  # 		options[["parametersToShow"]] <- paramsShownIdx
+  # 	}
+  # }
 
   if (is.list(options[["parametersToShow"]])) {
 
@@ -528,9 +523,6 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 			))
 		}
 	}
-
-	if (!is.null(options[["nameForNwarning"]]))
-		tb$addFootnote(message = options[["nameForNwarning"]])
 
 	jaspResults[["mainContainer"]][["mainTable"]] <- tb
 
