@@ -36,6 +36,19 @@ Form
     
     VariablesForm
     {
+//            visible: !monitorAllParameters.checked
+        height: 200
+        AvailableVariablesList  
+        { 
+            name: "parametersList";            
+            title: qsTr("Parameters in model")
+            source: ["model"]
+        }
+        AssignedVariablesList   { name: "monitoredParametersList";   title: qsTr("Monitor these parameters"); }
+    }
+    
+    VariablesForm
+    {
         height: 200
         AvailableVariablesList  
         { 
@@ -43,6 +56,8 @@ Form
             name: "monitoredParametersList2"
             title: monitorAllParameters.checked ? qsTr("Parameters in model") : qsTr("Monitored parameters")
             source: monitorAllParameters.checked ? ["model"] : ["parametersList"]
+//            source: ["model"]
+            onSourceChanged: { sourceChangedSignal(); console.log("HALLO") }
         }
         AssignedVariablesList   { name: "parametersShown";         title: qsTr("Show results for these parameters")}
     }
@@ -228,18 +243,6 @@ Form
             RadioButton { value: "monitorSelectedParameters";   label: qsTr("selected parameters")                                              }
         }
 
-        VariablesForm
-        {
-            visible: !monitorAllParameters.checked
-            height: 200
-            AvailableVariablesList  
-            { 
-                name: "parametersList";            
-                title: qsTr("Parameters in model")
-                source: monitorAllParameters.checked ? ["parametersShown"] : ["model"]
-            }
-            AssignedVariablesList   { name: "monitoredParametersList";   title: qsTr("Monitor these parameters"); }
-        }
         Group
         {
             title: qsTr("Specify parameters as string")
