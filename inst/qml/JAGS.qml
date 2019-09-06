@@ -117,45 +117,56 @@ Form
     Section
     {
         title: qsTr("Initial Values")
-        TextArea
+        JagsTableView
         {
-            title: qsTr("Enter initial values as an R list")
-            name: "initialValues"
-            textType: "Rcode"
-            text: qsTr("# Example of initial values for unknown mean and standard deviation:\n" +
-                       "# replicate(\"No. chains\", list(list(\n" +
-                       "#   mu = rnorm(1),\n" +
-                       "#   sigma = abs(rnorm(1)),\n" +
-                       "# )))"
-                       )
+            name        :   "userData3"
+            tableType   :   "initialValues"
+//            source      :   ["model"]// "monitoredParametersList2"
         }
+//        TextArea
+//        {
+//            title: qsTr("Enter initial values as an R list")
+//            name: "initialValues"
+//            textType: "Rcode"
+//            text: qsTr("# Example of initial values for unknown mean and standard deviation:\n" +
+//                       "# replicate(\"No. chains\", list(list(\n" +
+//                       "#   mu = rnorm(1),\n" +
+//                       "#   sigma = abs(rnorm(1)),\n" +
+//                       "# )))"
+//                       )
+//        }
     }
 
     Section
     {
         title: qsTr("Observed Values")
-        TextArea
+//        TextArea
+//        {
+//            title: qsTr("Enter observed values as an R list")
+//            name: "userData"
+//            textType: "Rcode"
+//            text: qsTr( "# A Binomial example:\n" + 
+//                        "# list(\n" +
+//                        "#   k = 5,\n" +
+//                        "#   n = 10\n" +
+//                        "# )"
+//                      )
+//        }
+        JagsTableView
         {
-            title: qsTr("Enter observed values as an R list")
-            name: "userData"
-            textType: "Rcode"
-            text: qsTr( "# A Binomial example:\n" + 
-                        "# list(\n" +
-                        "#   k = 5,\n" +
-                        "#   n = 10\n" +
-                        "# )"
-                      )
+            name        :   "userData2"
+            tableType   :   "userDataInput"
         }
         
-        TableView
-        {
-            name: "userData2"
-            modelType: "JAGSDataInputModel"
-            Layout.fillWidth: 	true
+//        TableView
+//        {
+//            name: "userData2"
+//            modelType: "JAGSDataInputModel"
+//            Layout.fillWidth: 	true
             
 //            Layout.fillWidth: true
 //            colName: "Filter"
-        }
+//        }
     }
 
     Section
