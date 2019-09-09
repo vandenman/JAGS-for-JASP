@@ -36,7 +36,7 @@ Form
     
     VariablesForm
     {
-//            visible: !monitorAllParameters.checked
+        visible: !monitorAllParameters.checked
         height: 200
         AvailableVariablesList  
         { 
@@ -52,18 +52,17 @@ Form
         height: 200
         AvailableVariablesList  
         { 
-            id: monitoredParametersList2
-            name: "monitoredParametersList2"
-            title: monitorAllParameters.checked ? qsTr("Parameters in model") : qsTr("Monitored parameters")
-            source: monitorAllParameters.checked ? ["model"] : ["parametersList"]
-//            source: ["model"]
-            onSourceChanged: { sourceChangedSignal(); console.log("HALLO") }
+            id:     monitoredParametersList2
+            name:   "monitoredParametersList2"
+            title:  monitorAllParameters.checked ? qsTr("Parameters in model") : qsTr("Monitored parameters")
+            source: monitorAllParameters.checked ? ["model"] : ["monitoredParametersList"]
         }
         AssignedVariablesList   { name: "parametersShown";         title: qsTr("Show results for these parameters")}
     }
 
     Section
-    {
+    {            
+        columns: 2
         title: qsTr("Plots")
         DropDown
         {
@@ -78,16 +77,13 @@ Form
                 { label: "Gray",        value: "gray"}
             ]
         }
-//        Group
-//        {
-            columns: 2
             Group
             {
                 title: qsTr("Plots")
                 CheckBox { name: "aggregateChains";        label: qsTr("Aggregate chains for densities and histograms"); checked:true   }
-                CheckBox { label: qsTr("Trace");              name: "plotTrace"                             }
                 CheckBox { label: qsTr("Density");            name: "plotDensity"                           }
                 CheckBox { label: qsTr("Histogram");          name: "plotHistogram"                         }
+                CheckBox { label: qsTr("Trace");              name: "plotTrace"                             }
                 CheckBox { label: qsTr("Autocorrelation");    name: "plotAutoCor"; id: autoCorrelation
                     IntegerField
                     {
@@ -126,7 +122,6 @@ Form
                     }
                 }
             }
-//        }
     }
     
     Section
@@ -136,7 +131,7 @@ Form
         {
             name        :   "userData3"
             tableType   :   "initialValues"
-//            source      :   ["model"]// "monitoredParametersList2"
+            source      :   ["model"]
         }
 //        TextArea
 //        {
@@ -172,16 +167,6 @@ Form
             name        :   "userData2"
             tableType   :   "userDataInput"
         }
-        
-//        TableView
-//        {
-//            name: "userData2"
-//            modelType: "JAGSDataInputModel"
-//            Layout.fillWidth: 	true
-            
-//            Layout.fillWidth: true
-//            colName: "Filter"
-//        }
     }
 
     Section
@@ -243,13 +228,13 @@ Form
             RadioButton { value: "monitorSelectedParameters";   label: qsTr("selected parameters")                                              }
         }
 
-        Group
-        {
-            title: qsTr("Specify parameters as string")
-            visible: false
-            TextField { name: "parametersMonitored";    label: qsTr("Parameters Monitored")}
-            TextField { name: "parametersShown0";        label: qsTr("Parameters Shown")    }
+//        Group
+//        {
+//            title: qsTr("Specify parameters as string")
+//            visible: false
+//            TextField { name: "parametersMonitored";    label: qsTr("Parameters Monitored")}
+//            TextField { name: "parametersShown0";        label: qsTr("Parameters Shown")    }
             
-        }
+//        }
     }
 }
