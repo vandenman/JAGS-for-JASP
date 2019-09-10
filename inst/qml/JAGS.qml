@@ -43,6 +43,7 @@ Form
             name: "parametersList";            
             title: qsTr("Parameters in model")
             source: ["model"]
+//            source: [{ name: "model", discard: "userData" }]
         }
         AssignedVariablesList   { name: "monitoredParametersList";   title: qsTr("Monitor these parameters"); }
     }
@@ -129,42 +130,18 @@ Form
         title: qsTr("Initial Values")
         JagsTableView
         {
-            name        :   "userData3"
+            name        :   "initialValues"
             tableType   :   "initialValues"
             source      :   ["model"]
         }
-//        TextArea
-//        {
-//            title: qsTr("Enter initial values as an R list")
-//            name: "initialValues"
-//            textType: "Rcode"
-//            text: qsTr("# Example of initial values for unknown mean and standard deviation:\n" +
-//                       "# replicate(\"No. chains\", list(list(\n" +
-//                       "#   mu = rnorm(1),\n" +
-//                       "#   sigma = abs(rnorm(1)),\n" +
-//                       "# )))"
-//                       )
-//        }
     }
 
     Section
     {
         title: qsTr("Observed Values")
-//        TextArea
-//        {
-//            title: qsTr("Enter observed values as an R list")
-//            name: "userData"
-//            textType: "Rcode"
-//            text: qsTr( "# A Binomial example:\n" + 
-//                        "# list(\n" +
-//                        "#   k = 5,\n" +
-//                        "#   n = 10\n" +
-//                        "# )"
-//                      )
-//        }
         JagsTableView
         {
-            name        :   "userData2"
+            name        :   "userData"
             tableType   :   "userDataInput"
         }
     }

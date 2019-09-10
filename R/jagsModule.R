@@ -43,7 +43,7 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 	  return(obj)
 
 	}
-	if (!options[["goodModel"]])
+	if (!options[["goodModel"]] || jaspResults[["mainContainer"]]$getError())
 	  return(NULL)
 
 	model <- options[["model"]]
@@ -198,68 +198,17 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
     # setup outer container with all common dependencies
     mainContainer <- createJaspContainer(dependencies = c("model", "noSamples", "noBurnin", "noThinning", "noChains",
                                                           "parametersMonitored", "parametersShown", "initialValues", "userData"))
+    mainContainer$addCitation(.JAGSCitations)
     jaspResults[["mainContainer"]] <- mainContainer
   }
 
-  if (isTRUE(rjags::jags.version() < "4.3.0")) {
-    jaspResults[["mainContainer"]]$setError(paste("Expected JAGS version 4.3.0 but found", as.character(rjags::jags.version())))
+  # checks and sets errors
+  .JAGSCheckJAGSInstallation(jaspResults[["mainContainer"]])
+  if (jaspResults[["mainContainer"]]$getError())
     return(options)
-  }
-
-  model <- trimws(options[["model"]])
-
-  # TODO: this is already done in qml? pass it as argument?
-  # we just need to know which parameters are column names in the data set.
-  header <- .readDataSetHeader(all.columns = TRUE)
-  cnms <- colnames(header)
-  hasCnms <- !(is.null(cnms) || length(cnms) == 0L)
-  if (hasCnms) {
-  	cnms <- .unv(cnms)
-  	options[["colNames"]] <- cnms
-  }
-
-  # otherwise empty column names break stuff down the road
-  cnms <- cnms[cnms != ""]
-
-  # get everything before a '~'
-  possibleParams <- stringr::str_extract_all(model, ".*(?=\\s~)")[[1L]]
-  # omit empty matches
-  possibleParams <- possibleParams[possibleParams != ""]
-  # remove superfluous whitespace (tabs)
-  possibleParams <- stringr::str_trim(possibleParams)
-  # change model{mu to mu
-  if (grepl("\\{", possibleParams[1L]))
-  	possibleParams[1L] <- sub("model\\s*\\{\\s*", "", possibleParams[1L])
-  # change mu[i] to mu
-  possibleParams <- unique(sapply(stringr::str_extract_all(possibleParams, "\\w+"), `[[`, 1L))
-
-  if (hasCnms) {
-
-  	# check for each element in possibleParams whether it matches any in cnms.
-  	# matches like contNormal[i] are matched, while contNormala[i] will not be matched.
-  	idx <- logical()
-  	for (param in possibleParams)
-  		idx[param] <- any(stringr::str_detect(param, paste0("\\b", cnms, "\\b")))
-
-  	possibleData   <- possibleParams[idx]
-  	possibleParams <- possibleParams[!idx]
-
-  	# note: the loop below can be sped up using the C implementation from stringdist::amatch
-		r <- vector("list", length(possibleParams))
-		names(r) <- possibleParams
-		for (i in seq_along(cnms)) {
-
-			ii <- agrep(cnms[i], possibleParams)
-			for (j in ii)
-				r[[j]] <- c(r[[j]], cnms[i])
-		}
-		options[["possibleTypos"]] <- r
-
-  } else {
-  	possibleData <- NULL
-  }
 
   # do we need these?
+  tmp <- .JAGSGetModelParamsAndData(options)
   options[["possibleParams"]] <- possibleParams
   options[["possibleData"]]   <- possibleData
   options[["hasData"]]        <- length(possibleData) > 0
@@ -406,155 +355,360 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
   if (is.null(jaspResults[["mainContainer"]][["plotContainer"]])) {
     plotContainer <- createJaspContainer(dependencies = c("parametersShown", "colorScheme"))
-    jaspResults[["mainContainer"]][["plotContainer"]] <- plotContainer
+    # jaspResults[["mainContainer"]][["plotContainer"]] <- plotContainer
   } else {
     plotContainer <- jaspResults[["mainContainer"]][["plotContainer"]]
   }
 
-  .JAGSsetPlotTheme(options)
-  .JAGSplotMarginalDensity  (plotContainer, options, mcmcResult)
-  .JAGSplotMarginalHistogram(plotContainer, options, mcmcResult)
-  .JAGSplotTrace            (plotContainer, options, mcmcResult)
-  .JAGSplotAcf              (plotContainer, options, mcmcResult)
-  .JAGSplotBivariateScatter (plotContainer, options, mcmcResult)
+  containerObj <- .JAGSInitPlotsContainers(plotContainer, options)
 
+  # put the container in jaspResults only now so that all empty plots appear at once
+  if (is.null(jaspResults[["mainContainer"]][["plotContainer"]]))
+    jaspResults[["mainContainer"]][["plotContainer"]] <- plotContainer
 
-  return(NULL)
+  if (is.null(mcmcResult) || jaspResults[["mainContainer"]][["plotContainer"]]$getError())
+    .JAGSFillPlotContainers(containerObj, options, mcmcResult)
+
+  .JAGSplotBivariateScatter(plotContainer, options, mcmcResult)
+
+  # .JAGSsetPlotTheme(options)
+  # .JAGSplotMarginalDensity  (plotContainer, options, mcmcResult)
+  # .JAGSplotMarginalHistogram(plotContainer, options, mcmcResult)
+  # .JAGSplotTrace            (plotContainer, options, mcmcResult)
+  # .JAGSplotAcf              (plotContainer, options, mcmcResult)
+  # .JAGSplotBivariateScatter (plotContainer, options, mcmcResult)
+
 }
 
-.JAGSsetPlotTheme <- function(options) {
-  colorScheme <- switch(
-    options[["colorScheme"]],
-    "blue"    = "blue",
-    "gray"    = "gray",
-    "Viridis" = "viridis",
-    "brewer-Dark2"
+.JAGSInitPlotsContainers <- function(plotContainer, options) {
+
+  params <- options[["bayesplot"]][["pars"]]
+  if (is.null(params))
+    params <- options[["bayesplot"]][["regex_pars"]]
+
+  # for each plot function, create an empty plot container (or the empty plot object)
+  output <- NULL
+  if (options[["plotDensity"]]) {
+
+    add <- list("function" = ".JAGSPlotTrace")
+    if (is.null(plotContainer[["plotDensity"]])) {
+      add[["container"]] <- createJaspContainer(title = "Marginal Density",  position = 1,
+                                                dependencies = c("plotDensity", "aggregateChains"))
+      plotContainer[["plotDensity"]] <- add[["container"]]
+    } else {
+      add[["container"]] <- plotContainer[["plotDensity"]]
+    }
+    output <- c(output, add)
+  }
+
+  if (options[["plotHistogram"]]) {
+
+    add <- list("function" = ".JAGSPlotHistogram")
+    if (is.null(plotContainer[["plotHistogram"]])) {
+      add[["container"]] <- createJaspContainer(title = "Marginal Histogram",  position = 2,
+                                                dependencies = c("plotHistogram", "aggregateChains"))
+      plotContainer[["plotHistogram"]] <- add[["container"]]
+    } else {
+      add[["container"]] <- plotContainer[["plotHistogram"]]
+    }
+    output <- c(output, add)
+  }
+
+  if (options[["plotTrace"]]) {
+
+    add <- list("function" = ".JAGSPlotTrace")
+    if (is.null(plotContainer[["plotTrace"]])) {
+      add[["container"]] <- createJaspContainer(title = "Trace Plots",  position = 3,
+                                                dependencies = c("plotTrace"))
+      plotContainer[["plotTrace"]] <- add[["container"]]
+    } else {
+      add[["container"]] <- plotContainer[["plotTrace"]]
+    }
+    output <- c(output, add)
+  }
+
+  if (options[["plotAutoCor"]]) {
+
+    add <- list("function" = ".JAGSPlotAutoCor")
+    if (is.null(plotContainer[["plotAutoCor"]])) {
+      add[["container"]] <- createJaspContainer(title = "Autocorrelation Plots",  position = 4,
+                                                dependencies = c("plotAutoCor", "noLags", "acfType"))
+      plotContainer[["plotAutoCor"]] <- add[["container"]]
+    } else {
+      add[["container"]] <- plotContainer[["plotAutoCor"]]
+    }
+    output <- c(output, add)
+  }
+
+  for (i in seq_along(output))
+    .JAGSInitContainerWithPlots(output[[i]][["container"]], params)
+
+  return(output)
+}
+
+.JAGSFillPlotContainers <- function(containerObj, options, mcmcResult) {
+
+  params <- options[["bayesplot"]][["pars"]]
+  if (is.null(params))
+    params <- options[["bayesplot"]][["regex_pars"]]
+  samples <- mcmcResult[["samples"]]
+
+  for (i in seq_len(nrow(containerObj)))
+    for (param in params)
+      if (!is.null(jaspContainer[[param]]) && is.null(jaspContainer[[param]]$plotObject)) {
+        jaspContainer[[param]]$status     <- "running"
+        jaspContainer[[param]]$plotObject <- plotFun(samples, param, options)
+      }
+}
+
+.JAGSInitContainerWithPlots <- function(jaspContainer, params) {
+  for (param in params) {
+    if (is.null(jaspContainer[[param]])) {
+      jaspPlot <- createJaspPlot(title = param)
+      jaspPlot$dependOn(optionContainsValue = list(parametersShown = param))
+      jaspContainer[[param]] <- jaspPlot
+    }
+  }
+}
+
+.JAGSPlotDensity <- function(samples, param, options) {
+
+  # TODO: get parameter bounds and respect these, e.g., truncate [0, 1] (probably pretty hard though)
+  npoints <- 2^10 # precision for density estimation
+  if (options[["aggregateChains"]]) {
+    df <- do.call(rbind.data.frame, lapply(seq_along(samples), function(i) {
+      d <- density(samples[[i]][, param], n = npoints)[c("x", "y")]
+      return(data.frame(x = d[["x"]], y = d[["y"]], g = factor(i)))
+    }))
+    mapping <- ggplot2::aes(x = x, y = y, color = g)
+    colorScale <- JASPgraphs::scale_JASPcolor_discrete(name = "Chain", palette = colorPalette)
+  } else {
+    d <- density(unlist(lapply(samples, `[`, i = 1:n, j = param), use.names = FALSE))
+    df <- data.frame(x = d[["x"]], y = d[["y"]])
+    mapping <- ggplot2::aes(x = x, y = y)
+    colorScale <- NULL
+  }
+
+  g <- JASPgraphs::themeJasp(
+    ggplot2::ggplot(df, mapping) +
+      ggplot2::geom_line(show.legend = options[["aggregateChains"]]) +
+      ggplot2::labs(x = param, y = "Density") +
+      colorScale, legend.position = c(.85, .85)
   )
-  bayesplot::color_scheme_set(colorScheme)
-  bayesplot::bayesplot_theme_set(new = JASPgraphs::themeJaspRaw())
-  return(NULL)
+  return(g)
 }
 
-.JAGSplotMarginalDensity <- function(plotContainer, options, mcmcResult) {
+.JAGSPlotHistogram <- function(samples, param, options) {
 
-	if (!options[["plotDensity"]] || !is.null(plotContainer[["plotMarginalDensity"]])) return()
+  # TODO: get parameter bounds and respect these, e.g., truncate [0, 1] (probably pretty hard though)
+  npoints <- 2^10 # precision for density estimation
+  if (options[["aggregateChains"]]) {
+    df <- do.call(rbind.data.frame, lapply(seq_along(samples), function(i) {
+      h <- density(samples[[i]][, param], n = npoints)[c("x", "y")]
+      return(data.frame(x = d[["mids"]], y = d[["counts"]], g = factor(i)))
+    }))
+    mapping <- ggplot2::aes(x = x, y = y, color = g, fill = g)
+    colorScale <- JASPgraphs::scale_JASPcolor_discrete(name = "Chain", palette = colorPalette)
+    fillScale  <- JASPgraphs::scale_JASPfill_discrete(name = "Chain", palette = colorPalette)
+  } else {
+    d <- hist(unlist(lapply(samples, `[`, i = 1:n, j = param), use.names = FALSE), plot = FALSE)
+    df <- data.frame(x = d[["mids"]], y = d[["counts"]])
+    mapping <- ggplot2::aes(x = x, y = y)
+    fillScale <- colorScale <- NULL
+  }
 
-	jaspPlot <- createJaspPlot(title  = "Marginal Density", position = 1,
-	                           dependencies = c("plotDensity", "aggregateChains"))
-	plotContainer[["plotMarginalDensity"]] <- jaspPlot
-  if (is.null(mcmcResult) || plotContainer$getError())
-    return()
-
-	if (options[["aggregateChains"]]) {
-	  plot <- bayesplot::mcmc_dens(mcmcResult[["samples"]],
-	                               pars = options[["bayesplot"]][["pars"]],
-	                               regex_pars = options[["bayesplot"]][["regex_pars"]]
-	  )
-	} else {
-	  plot <- bayesplot::mcmc_dens_overlay(mcmcResult[["samples"]],
-	                                       pars = options[["bayesplot"]][["pars"]],
-	                                       regex_pars = options[["bayesplot"]][["regex_pars"]]
-	  )
-	}
-	jaspPlot$plotObject <- plot + JASPgraphs::themeJaspRaw()
-	return()
+  g <- JASPgraphs::themeJasp(
+    ggplot2::ggplot(df, mapping) +
+      ggplot2::geom_col(show.legend = options[["aggregateChains"]], position = ggplot2::position_dodge()) +
+      ggplot2::labs(x = param, y = "Counts") +
+      colorScale + fillScale, legend.position = c(.85, .85)
+  )
+  return(g)
 }
 
-.JAGSplotMarginalHistogram <- function(plotContainer, options, mcmcResult) {
+.JAGSPlotTrace <- function(samples, param, options) {
 
-	if (!options[["plotHistogram"]] || !is.null(plotContainer[["plotMarginalHistogram"]])) return()
+  n <- nrow(samples[[1L]])
+  df <- data.frame(
+    x = rep(seq_len(n), length(samples)),
+    y = unlist(lapply(samples, `[`, i = 1:n, j = param), use.names = FALSE),
+    g = factor(rep(seq_along(samples), each = n))
+  )
 
-	jaspPlot <- createJaspPlot(title  = "Marginal Histogram",  position = 2,
-	                           dependencies = c("plotHistogram", "aggregateChains"))
-	plotContainer[["plotMarginalHistogram"]] <- jaspPlot
-  if (is.null(mcmcResult) || plotContainer$getError())
-    return()
-
-	if (options[["aggregateChains"]]) {
-	  plot <- bayesplot::mcmc_hist(mcmcResult[["samples"]],
-	                               pars = options[["bayesplot"]][["pars"]],
-	                               regex_pars = options[["bayesplot"]][["regex_pars"]]
-	  )
-	} else {
-	  plot <- bayesplot::mcmc_hist_by_chain(mcmcResult[["samples"]],
-	                                       pars = options[["bayesplot"]][["pars"]],
-	                                       regex_pars = options[["bayesplot"]][["regex_pars"]]
-	  )
-	}
-	jaspPlot$plotObject <- plot + JASPgraphs::themeJaspRaw()
-	return()
+  g <- JASPgraphs::themeJasp(
+    ggplot2::ggplot(df, ggplot2::aes(x = x, y = y, color = g)) +
+      ggplot2::geom_line(show.legend = FALSE) +
+      ggplot2::labs(x = "Iteration", y = param) +
+      JASPgraphs::scale_JASPcolor_discrete(palette = colorPalette)
+  )
+  return(g)
 }
 
-.JAGSplotTrace <- function(plotContainer, options, mcmcResult) {
+.JAGSPlotAcf <- function(samples, param, options) {
 
-	if (!options[["plotTrace"]] || !is.null(plotContainer[["plotTrace"]])) return()
+  nchains  <- length(samples)
+  nlags    <- options[["noLags"]] + 1L
+  acfs <- numeric(nchains * nlags)
+  for (i in seq_len(nchains))
+    acfs[(1 + (i-1) * nlags):(i * nlags)] <- c(stats::acf(x = samples[[i]][, param], type = "correlation",
+                                                          lag.max = nlags - 1L, plot = FALSE)$acf)
 
-	jaspPlot <- createJaspPlot(title  = "Trace Plots",  position = 3,
-	                           dependencies = c("plotTrace", "parametersShown"))
-	plotContainer[["plotTrace"]] <- jaspPlot
-  if (is.null(mcmcResult) || plotContainer$getError())
-    return()
-
-  # plot$width <- 320 *
-  jaspPlot$plotObject <- bayesplot::mcmc_trace(mcmcResult[["samples"]],
-    pars = options[["bayesplot"]][["pars"]],
-    regex_pars = options[["bayesplot"]][["regex_pars"]]
-  ) + JASPgraphs::themeJaspRaw()
-	return()
-}
-
-.JAGSplotAcf <- function(plotContainer, options, mcmcResult) {
-
-	if (!options[["plotAutoCor"]] || !is.null(plotContainer[["plotAutoCor"]])) return()
-
-	jaspPlot <- createJaspPlot(title = "Autocorrelation Plot",  position = 4,
-	                           dependencies = c("plotAutoCor", "parametersShown", "noLags", "acfType"))
-	plotContainer[["plotAutoCor"]] <- jaspPlot
-  if (is.null(mcmcResult) || plotContainer$getError())
-    return()
+  df <- data.frame(
+    x = seq(0:(nlags - 1L)),
+    y = acfs,
+    g = factor(rep(seq_len(nchains), each = nlags))
+  )
 
   if (options[["acfType"]] == "acfLines") {
-    plotfun <- bayesplot::mcmc_acf
+    geom <- ggplot2::geom_line()
   } else {
-    plotfun <- bayesplot::mcmc_acf_bar
+    geom <- ggplot2::geom_col(position = ggplot2::position_dodge())
   }
+  colorScale <- JASPgraphs::scale_JASPcolor_discrete(name = "Chain", palette = colorPalette)
+  fillScale  <- JASPgraphs::scale_JASPfill_discrete(name = "Chain", palette = colorPalette)
 
-  jaspPlot$plotObject <- plotfun(
-    mcmcResult$samples,
-    pars = options[["bayesplot"]][["pars"]],
-    regex_pars = options[["bayesplot"]][["regex_pars"]],
-    lags = options[["noLags"]]
-  ) + JASPgraphs::themeJaspRaw()
-	return()
+  g <- JASPgraphs::themeJasp(
+    ggplot2::ggplot(data = df, mapping = ggplot2::aes(x = x, y = y, color = g, group = g, fill = g)) +
+      geom + colorScale + fillScale + ggplot2::labs(x = "Lag", y = "Autocorrelation"),
+    legend.position = c(.85, .85)
+  )
+  return(g)
 }
 
-.JAGSplotBivariateScatter <- function(plotContainer, options, mcmcResult) {
-
-	if (!options[["plotBivarHex"]] || !is.null(plotContainer[["plotBivarHex"]])) return()
-
-  jaspPlot <- createJaspPlot(title  = "Bivariate Scatter Plot",  position = 5,
-                             dependencies = c("plotBivarHex", "parametersShown", "bivariateScatterDiagType",
-                                              "bivariateScatterOffDiagType"))
-  plotContainer[["plotBivarHex"]] <- jaspPlot
-  if (is.null(mcmcResult) || plotContainer$getError())
-    return()
-
-  if (length(options[["parametersToShow"]]) >= 2L) {
-    png(f <- tempfile())
-    plot <- bayesplot::mcmc_pairs(
-      mcmcResult[["samples"]],
-      pars = options[["bayesplot"]][["pars"]],
-      regex_pars = options[["bayesplot"]][["regex_pars"]],
-      diag_fun = options[["bivariateScatterDiagType"]],
-      off_diag_fun = options[["bivariateScatterOffDiagType"]]
-    )# + JASPgraphs::themeJaspRaw()
-    if (file.exists(f)) file.remove(f)
-    jaspPlot$plotObject <- plot
-  } else {
-    jaspPlot$setError("At least two parameters need to be monitored and shown to make a bivariate scatter plot!")
-  }
-	return()
-}
+# Old plots ----
+# .JAGSsetPlotTheme <- function(options) {
+#   colorScheme <- switch(
+#     options[["colorScheme"]],
+#     "blue"    = "blue",
+#     "gray"    = "gray",
+#     "Viridis" = "viridis",
+#     "brewer-Dark2"
+#   )
+#   bayesplot::color_scheme_set(colorScheme)
+#   bayesplot::bayesplot_theme_set(new = JASPgraphs::themeJaspRaw())
+#   return(NULL)
+# }
+#
+# .JAGSplotMarginalDensity <- function(plotContainer, options, mcmcResult) {
+#
+# 	if (!options[["plotDensity"]] || !is.null(plotContainer[["plotMarginalDensity"]])) return()
+#
+# 	jaspPlot <- createJaspPlot(title  = "Marginal Density", position = 1,
+# 	                           dependencies = c("plotDensity", "aggregateChains"))
+# 	plotContainer[["plotMarginalDensity"]] <- jaspPlot
+#   if (is.null(mcmcResult) || plotContainer$getError())
+#     return()
+#
+# 	if (options[["aggregateChains"]]) {
+# 	  plot <- bayesplot::mcmc_dens(mcmcResult[["samples"]],
+# 	                               pars = options[["bayesplot"]][["pars"]],
+# 	                               regex_pars = options[["bayesplot"]][["regex_pars"]]
+# 	  )
+# 	} else {
+# 	  plot <- bayesplot::mcmc_dens_overlay(mcmcResult[["samples"]],
+# 	                                       pars = options[["bayesplot"]][["pars"]],
+# 	                                       regex_pars = options[["bayesplot"]][["regex_pars"]]
+# 	  )
+# 	}
+# 	jaspPlot$plotObject <- plot + JASPgraphs::themeJaspRaw()
+# 	return()
+# }
+#
+# .JAGSplotMarginalHistogram <- function(plotContainer, options, mcmcResult) {
+#
+# 	if (!options[["plotHistogram"]] || !is.null(plotContainer[["plotMarginalHistogram"]])) return()
+#
+# 	jaspPlot <- createJaspPlot(title  = "Marginal Histogram",  position = 2,
+# 	                           dependencies = c("plotHistogram", "aggregateChains"))
+# 	plotContainer[["plotMarginalHistogram"]] <- jaspPlot
+#   if (is.null(mcmcResult) || plotContainer$getError())
+#     return()
+#
+# 	if (options[["aggregateChains"]]) {
+# 	  plot <- bayesplot::mcmc_hist(mcmcResult[["samples"]],
+# 	                               pars = options[["bayesplot"]][["pars"]],
+# 	                               regex_pars = options[["bayesplot"]][["regex_pars"]]
+# 	  )
+# 	} else {
+# 	  plot <- bayesplot::mcmc_hist_by_chain(mcmcResult[["samples"]],
+# 	                                       pars = options[["bayesplot"]][["pars"]],
+# 	                                       regex_pars = options[["bayesplot"]][["regex_pars"]]
+# 	  )
+# 	}
+# 	jaspPlot$plotObject <- plot + JASPgraphs::themeJaspRaw()
+# 	return()
+# }
+#
+# .JAGSplotTrace <- function(plotContainer, options, mcmcResult) {
+#
+# 	if (!options[["plotTrace"]] || !is.null(plotContainer[["plotTrace"]])) return()
+#
+# 	jaspPlot <- createJaspPlot(title  = "Trace Plots",  position = 3,
+# 	                           dependencies = c("plotTrace", "parametersShown"))
+# 	plotContainer[["plotTrace"]] <- jaspPlot
+#   if (is.null(mcmcResult) || plotContainer$getError())
+#     return()
+#
+#   # plot$width <- 320 *
+#   jaspPlot$plotObject <- bayesplot::mcmc_trace(mcmcResult[["samples"]],
+#     pars = options[["bayesplot"]][["pars"]],
+#     regex_pars = options[["bayesplot"]][["regex_pars"]]
+#   ) + JASPgraphs::themeJaspRaw()
+# 	return()
+# }
+#
+# .JAGSplotAcf <- function(plotContainer, options, mcmcResult) {
+#
+# 	if (!options[["plotAutoCor"]] || !is.null(plotContainer[["plotAutoCor"]])) return()
+#
+# 	jaspPlot <- createJaspPlot(title = "Autocorrelation Plot",  position = 4,
+# 	                           dependencies = c("plotAutoCor", "parametersShown", "noLags", "acfType"))
+# 	plotContainer[["plotAutoCor"]] <- jaspPlot
+#   if (is.null(mcmcResult) || plotContainer$getError())
+#     return()
+#
+#   if (options[["acfType"]] == "acfLines") {
+#     plotfun <- bayesplot::mcmc_acf
+#   } else {
+#     plotfun <- bayesplot::mcmc_acf_bar
+#   }
+#
+#   jaspPlot$plotObject <- plotfun(
+#     mcmcResult$samples,
+#     pars = options[["bayesplot"]][["pars"]],
+#     regex_pars = options[["bayesplot"]][["regex_pars"]],
+#     lags = options[["noLags"]]
+#   ) + JASPgraphs::themeJaspRaw()
+# 	return()
+# }
+#
+# .JAGSplotBivariateScatter <- function(plotContainer, options, mcmcResult) {
+#
+# 	if (!options[["plotBivarHex"]] || !is.null(plotContainer[["plotBivarHex"]])) return()
+#
+#   jaspPlot <- createJaspPlot(title  = "Bivariate Scatter Plot",  position = 5,
+#                              dependencies = c("plotBivarHex", "parametersShown", "bivariateScatterDiagType",
+#                                               "bivariateScatterOffDiagType"))
+#   plotContainer[["plotBivarHex"]] <- jaspPlot
+#   if (is.null(mcmcResult) || plotContainer$getError())
+#     return()
+#
+#   if (length(options[["parametersToShow"]]) >= 2L) {
+#     png(f <- tempfile())
+#     plot <- bayesplot::mcmc_pairs(
+#       mcmcResult[["samples"]],
+#       pars = options[["bayesplot"]][["pars"]],
+#       regex_pars = options[["bayesplot"]][["regex_pars"]],
+#       diag_fun = options[["bivariateScatterDiagType"]],
+#       off_diag_fun = options[["bivariateScatterOffDiagType"]]
+#     )# + JASPgraphs::themeJaspRaw()
+#     if (file.exists(f)) file.remove(f)
+#     jaspPlot$plotObject <- plot
+#   } else {
+#     jaspPlot$setError("At least two parameters need to be monitored and shown to make a bivariate scatter plot!")
+#   }
+# 	return()
+# }
 
 # Errors ----
 .extractJAGSErrorMessage <- function(error) {
@@ -631,7 +785,76 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
   ))
 }
 
+.JAGSCheckJAGSInstallation <- function(jaspContainer) {
+  # NOTE: this function does setError if loadNamespace("rjags") fails.
+  # Thus, all other calls to rjags:: should be preceded by $getError().
+  e <- try(loadNamespace("rjags"), silent = TRUE)
+  if (isTryError(e)) {
+    # Sys.getenv() returns "" if nothing was found
+    jaspContainer$setError(sprintf("Could not find the JAGS executable at %s.\nPlease contact the JASP team for support.", Sys.getenv("JAGS_HOME")))
+  } else if (isTRUE(rjags::jags.version() < "4.3.0")) {
+    jaspContainer$setError(paste("Expected JAGS version 4.3.0 but found", as.character(rjags::jags.version())))
+  }
+  return(NULL)
+}
+
+
 # helper functions ----
+.JAGSGetModelParamsAndData <- function(options) {
+  model <- trimws(options[["model"]])
+  # TODO: this is already done in qml? pass it as argument?
+  # we just need to know which parameters are column names in the data set.
+  header <- .readDataSetHeader(all.columns = TRUE)
+  cnms <- colnames(header)
+  hasCnms <- !(is.null(cnms) || length(cnms) == 0L)
+  if (hasCnms) {
+    cnms <- .unv(cnms)
+    options[["colNames"]] <- cnms
+  }
+
+  # otherwise empty column names break stuff down the road
+  cnms <- cnms[cnms != ""]
+
+  # get everything before a '~'
+  possibleParams <- stringr::str_extract_all(model, ".*(?=\\s~)")[[1L]]
+  # omit empty matches
+  possibleParams <- possibleParams[possibleParams != ""]
+  # remove superfluous whitespace (tabs)
+  possibleParams <- stringr::str_trim(possibleParams)
+  # change model{mu to mu
+  if (grepl("\\{", possibleParams[1L]))
+    possibleParams[1L] <- sub("model\\s*\\{\\s*", "", possibleParams[1L])
+  # change mu[i] to mu
+  possibleParams <- unique(sapply(stringr::str_extract_all(possibleParams, "\\w+"), `[[`, 1L))
+
+  if (hasCnms) {
+
+    # check for each element in possibleParams whether it matches any in cnms.
+    # matches like contNormal[i] are matched, while contNormala[i] will not be matched.
+    idx <- logical()
+    for (param in possibleParams)
+      idx[param] <- any(stringr::str_detect(param, paste0("\\b", cnms, "\\b")))
+
+    possibleData   <- possibleParams[idx]
+    possibleParams <- possibleParams[!idx]
+
+    # note: the loop below can be sped up using the C implementation from stringdist::amatch
+    r <- vector("list", length(possibleParams))
+    names(r) <- possibleParams
+    for (i in seq_along(cnms)) {
+
+      ii <- agrep(cnms[i], possibleParams)
+      for (j in ii)
+        r[[j]] <- c(r[[j]], cnms[i])
+    }
+    options[["possibleTypos"]] <- r
+
+  } else {
+    possibleData <- NULL
+  }
+  return(list(possibleParams = possibleParams, possibleData = possibleData))
+}
+
 .JAGSisPureNumber <- function(x) suppressWarnings(!is.na(as.numeric(x)))
 
 .JAGSreadRcode <- function(jaspResults, string, type = c("initial values", "data"), noChains = 1L) {
@@ -657,9 +880,19 @@ JAGS <- function(jaspResults, dataset, options, state = NULL) {
 
 .JAGSWarningSymbol <- "&#9888;"
 
+# References ----
+# citation("rjags")
+# citation("coda")
+# citation("stringr")
+.JAGSCitations <- c(
+  "rjags"   = "Martyn Plummer (2018). rjags: Bayesian Graphical Models using MCMC. R package version 4-8. https://CRAN.R-project.org/package=rjags",
+  "coda"    = "Martyn Plummer, Nicky Best, Kate Cowles and Karen Vines (2006). CODA: Convergence Diagnosis and Output Analysis for MCMC, R News, vol 6, 7-11",
+  "stringr" = "Hadley Wickham (2019). stringr: Simple, Consistent Wrappers for Common String Operations. R package version 1.4.0. https://CRAN.R-project.org/package=stringr",
+  "JAGS"    = "Plummer, Martyn. (2003). JAGS: A Program for Analysis of Bayesian Graphical Models using Gibbs Sampling. 3rd International Workshop on Distributed Statistical Computing (DSC 2003); Vienna, Austria. 124."
+)
+
 # useful!
 # rjags::jags.version()
-# rjags:::
 
 # old code for .JAGSInitOptions ----
 # old approach
